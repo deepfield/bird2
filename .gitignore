@@ -12,3 +12,7 @@
 /sysdep/autoconf.h.in
 /sysdep/autoconf.h.in~
 /cscope.*
+/tools/config.guess
+/tools/config.sub
+/debian/bird2/
+/debian/.debhelper/

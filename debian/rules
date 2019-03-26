@@ -1,0 +1,12 @@
+#!/usr/bin/make -f
+include Makefile
+
+# clean comes from BIRD Makefile
+
+build: all
+
+binary:
+	make install DESTDIR=debian/bird2
+	dh_makeshlibs
+	dh_gencontrol
+	dh_builddeb
