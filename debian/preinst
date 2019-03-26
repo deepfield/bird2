@@ -2,11 +2,11 @@
 #
 # preinstall shell script for bird2
 #
+set -e
 SYSCONF_DIR=/usr/local/etc
 CONF_FILE=${SYSCONF_DIR}/bird.conf
 
 if [ -f ${CONF_FILE} ] ; then
-    echo "A bird configuration exists"
     # detect bird version from conf file
     if grep --q "listen bgp" ${CONF_FILE}; then
          CONF_VERSION=1
@@ -18,6 +18,8 @@ if [ -f ${CONF_FILE} ] ; then
         cp ${CONF_FILE} ${SYSCONF_DIR}/bird.conf.backup
         echo "BIRD Version 1 config file detected, saved to ${SYSCONF_DIR}/bird.conf.backup"
     fi
+    echo "BIRD configuration version ${CONF_VERSION} detected."
 else
     echo "No bird configuration exists - we are in the clear"
+    exit 0
 fi
