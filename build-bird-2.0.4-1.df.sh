@@ -64,4 +64,4 @@ mv *.deb ${CUR_DIR}
 echo "Debian files have been saved in ${CUR_DIR}"
 
 # Clean up
-rm -rf ${BUILD_DIR}
+rm -rf ${BUILD_PARENT_DIR}
