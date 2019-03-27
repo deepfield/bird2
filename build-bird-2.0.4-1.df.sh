@@ -4,6 +4,10 @@
 #
 # build - prerequisites are documented in debian/control under build-depends
 #
+# build dependencies
+# apt-get -y install autoconf, flex, bison, libncurses5-dev, \
+#   git, libreadline-dev, debhelper (>= 9)
+#
 
 PKG_NAME=bird2
 PKG_VERSION=2.0.4
