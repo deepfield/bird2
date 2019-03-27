@@ -8,6 +8,7 @@
 PKG_NAME=bird2
 PKG_VERSION=2.0.4
 PKG_REV=1.df
+PKG_ARCH=amd64
 
 VERSION=${PKG_VERSION}-${PKG_REV}
 
@@ -15,12 +16,19 @@ GIT_REPO=https://github.com/deepfield/bird2.git
 GIT_BRANCH=2.0.4
 
 CUR_DIR=${PWD}
-MAINTAINER=deepfield-syseng
+#
+# directory layout
+#
+# /tmp/bird2-<epoch>/<BUILD_DIR> - git clone
+# /tmp/bird2-<epoch>/<PACKAGE_DIR> - binaries and DEBIAN
 BUILD_ROOT_DIR=/tmp
-BUILD_DIR=${PKG_NAME}-$(date +'%s')/${PKG_NAME}-${VERSION}
+BUILD_PARENT_DIR=${BUILD_ROOT_DIR}/${PKG_NAME}-$(date +'%s')
+BUILD_DIR=${PKG_NAME}-${VERSION}
+PACKAGE_DIR=${PKG_NAME}-${VERSION}-${PKG_ARCH}
+PACKAGE_NAME=${PKG_NAME}-${VERSION}-${PKG_ARCH}.deb
 
-mkdir -p ${BUILD_ROOT_DIR}/${BUILD_DIR}
-cd ${BUILD_ROOT_DIR}
+mkdir -p ${BUILD_PARENT_DIR}
+cd ${BUILD_PARENT_DIR}
 
 git clone -b ${GIT_BRANCH} ${GIT_REPO} ${BUILD_DIR}
 
@@ -29,7 +37,7 @@ cd ${BUILD_DIR}
 git clean -dxf
 
 # DEV only
-# cp -r ${CUR_DIR}/debian/ .
+cp -r ${CUR_DIR}/DEBIAN/ .
 
 # build the actual debian
 autoreconf
@@ -37,10 +45,17 @@ autoreconf
 ./configure --enable-client --enable-pthreads --enable-memcheck \
     "--with-protocols=bfd babel bgp mrt ospf perf pipe radv rip static" \
     --enable-mpls-kernel --with-iproutedir=/etc/iproute2
-
-ls -ahl debian
-dpkg-buildpackage -b -us -uc
+make
+#
+# build the package directory
+#
+make install DESTDIR=../${PACKAGE_DIR}
 cd ..
+echo "We are in ${PWD}"
+cp -r ${BUILD_DIR}/DEBIAN ${PACKAGE_DIR}/DEBIAN
+ls -ahl
+dpkg-deb --build ${PACKAGE_DIR} ${PACKAGE_NAME}
+
 mv *.deb ${CUR_DIR}
 echo "Debian files have been saved in ${CUR_DIR}"
 
