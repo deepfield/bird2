@@ -18,7 +18,7 @@ case "$1" in
              CONF_VERSION=2
         fi
         # if version 1 then we save
-        if [ ${CONF_VERSION} == 1 ] ; then
+        if [ ${CONF_VERSION} -eq 1 ] ; then
             cp ${CONF_FILE} ${SYSCONF_DIR}/bird.conf.backup
             echo "BIRD Version 1 config file detected, saved to ${SYSCONF_DIR}/bird.conf.backup"
         fi
