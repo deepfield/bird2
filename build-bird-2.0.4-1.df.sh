@@ -48,7 +48,7 @@ autoreconf
 # these are the default options, but let's state them specifically
 ./configure --enable-client --enable-pthreads --enable-memcheck \
     "--with-protocols=bfd babel bgp mrt ospf perf pipe radv rip static" \
-    --enable-mpls-kernel --with-iproutedir=/etc/iproute2
+    --with-iproutedir=/etc/iproute2
 make
 #
 # build the package directory
