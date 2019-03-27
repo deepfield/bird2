@@ -55,9 +55,10 @@ make
 #
 make install DESTDIR=../${PACKAGE_DIR}
 cd ..
-echo "We are in ${PWD}"
+# override the example bird configuration in the package with our minimal bird configuration
+cp ${BUILD_DIR}/bird-minimal.conf ${PACKAGE_DIR}/usr/local/etc/bird.conf
+# copy DEBIAN binary packages into the packaging directory
 cp -r ${BUILD_DIR}/DEBIAN ${PACKAGE_DIR}/DEBIAN
-ls -ahl
 dpkg-deb --build ${PACKAGE_DIR} ${PACKAGE_NAME}
 
 mv *.deb ${CUR_DIR}
