@@ -14,3 +14,4 @@
 /cscope.*
 /debian/bird2/
 /debian/.debhelper/
+*.deb
