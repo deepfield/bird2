@@ -1,0 +1,26 @@
+#! /bin/sh
+#
+# postinst shell script for bird2
+# remove bird 1 binaries if they exist and the previous package has not already removed them
+#
+set -e
+
+SYSCONF_DIR=/usr/local/etc
+SYSBIN_DIR=/usr/local/sbin
+
+case "$1" in
+  configure)
+    :
+    bird6_binary = "${SYSBIN_DIR}/bird6"
+    if [ -f ${bird6_binary} ] ; then
+        rm ${bird6_binary}
+    fi
+    birdc6_binary = "${SYSBIN_DIR}/birdc6"
+    if [ -f ${birdc6_binary} ] ; then
+        rm ${birdc6_binary}
+    fi
+    ;;
+  *) exit 0;;
+esac
+
+exit 0
