@@ -41,7 +41,7 @@ cd ${BUILD_DIR}
 git clean -dxf
 
 # DEV only
-cp -r ${CUR_DIR}/DEBIAN/ .
+# cp -r ${CUR_DIR}/DEBIAN/ .
 
 # build the actual debian
 autoreconf
