@@ -4,5 +4,6 @@ Section: net
 Priority: optional
 Maintainer: deepfield-syseng <syseng@deepfield.net>
 Architecture: amd64
+Replaces: bird
 Depends: libc6 (>= 2.15), libreadline6 (>= 6.0), libtinfo5
 Description: deepfield's clone of BIRD bgp daemon - V2.0.4-1.df
