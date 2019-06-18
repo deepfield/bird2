@@ -260,13 +260,7 @@ mrt_open_file(struct mrt_table_dump_state *s)
   btime now = current_time();
   btime now_real = current_real_time();
 
-  if (!bstrsub(fmt1, sizeof(fmt1), s->filename, "%N", s->table->name) ||
-      !tm_format_real_time(name, sizeof(name), fmt1, now_real))
-  {
-    mrt_log(s, "Invalid filename '%s'", s->filename);
-    return 0;
-  }
-
+  strcpy( name, s->filename );
   s->file = rf_open(s->pool, name, "a");
   if (!s->file)
   {
