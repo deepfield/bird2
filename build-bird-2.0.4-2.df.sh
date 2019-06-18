@@ -17,7 +17,7 @@ PKG_ARCH=amd64
 VERSION=${PKG_VERSION}-${PKG_REV}
 
 GIT_REPO=https://github.com/deepfield/bird2.git
-GIT_BRANCH=2.0.4
+GIT_BRANCH="${0:-2.0.4}"
 
 CUR_DIR=${PWD}
 #
