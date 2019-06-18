@@ -11,7 +11,7 @@ apt-get -y install build-essential autoconf flex bison libtool libncurses5-dev \
 
 PKG_NAME=bird2
 PKG_VERSION=2.0.4
-PKG_REV=1.df
+PKG_REV=2.df
 PKG_ARCH=amd64
 
 VERSION=${PKG_VERSION}-${PKG_REV}
