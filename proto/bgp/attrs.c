@@ -136,11 +136,10 @@ bgp_put_attr_hdr4(byte *buf, uint code, uint flags, uint len)
 static inline int
 bgp_put_attr_hdr(byte *buf, uint code, uint flags, uint len)
 {
-  if (len < 256)
-    return bgp_put_attr_hdr3(buf, code, flags, len);
-  else
+  if ((len > 255) || (flags & BAF_EXT_LEN))
     return bgp_put_attr_hdr4(buf, code, flags, len);
-}
+  return bgp_put_attr_hdr3(buf, code, flags, len);
+}  
 
 static int
 bgp_encode_u8(struct bgp_write_state *s UNUSED, eattr *a, byte *buf, uint size)
