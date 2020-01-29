@@ -16,3 +16,4 @@
 /debian/.debhelper/
 *.deb
 .vscode/
+.idea
