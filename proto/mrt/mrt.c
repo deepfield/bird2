@@ -456,8 +456,31 @@ mrt_rib_table_entry(struct mrt_table_dump_state *s, rte *r)
       mrt_log(s, "Attribute list too long for %N", r->net->n.addr);
       alen = 0;
     }
+    void * len_pos = b->pos - 2;        /* save position of length byte */
 
-    put_u16(b->pos - 2, alen);
+    // add the nexthop if mp_reach was 
+    if ( s->bws->mp_reach && s->bws->mp_next_hop) {
+        byte *end_attr_buf = b->pos + alen;
+        int lh = 0;
+        eattr *next_hop = s->bws->mp_next_hop;
+        /*
+         * mp_next_hop is always encoded as ipv6 even when it's an ipv4
+         * write mp_next_hop as an MP_REACH_NLRI field
+         */
+        if ( 16 == next_hop->u.ptr->length ) {
+           ip6_addr *addr = (void *) s->bws->mp_next_hop->u.ptr->data;
+           *end_attr_buf = next_hop->flags;
+           *(end_attr_buf+1) = BA_MP_REACH_NLRI;
+           /* don't have to write afi, safi - they are implied by rib table */
+           *(end_attr_buf+2) = 16+1;                     /* length of attribute */
+           *(end_attr_buf+3) = 16;                       /* length of address */
+           put_ip6(end_attr_buf+4, ipa_to_ip6(*addr));
+           lh = 19;
+        }
+        alen += 1+lh;
+    }
+
+    put_u16(len_pos, alen);
     b->pos += alen;
   }
 #endif
