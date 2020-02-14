@@ -91,6 +91,9 @@ then
 fi
 
 # build the actual debian
+# generate the system dependent auto conf modules
+autoreconf
+# generate the configure modules
 autoconf
 # these are the default options, but let's state them specifically
 ./configure --enable-client --enable-pthreads --enable-memcheck \
