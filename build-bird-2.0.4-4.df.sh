@@ -13,33 +13,33 @@ BUILD_CHECK_DEP=YES
 # ./build-bird2-2.0.4-4-df.sh tag 2.0.4-3 - will build 2.0.4-3 tag
 
 while (( "$#" )); do
-	case "$1" in
-		-h|--help) 
-		 cat << USAGE
+        case "$1" in
+                -h|--help) 
+                 cat << USAGE
 $0 [local] [tag abc] [-n|--no-depend-check]
 
    -n
    --no-depend-check    skip checking build dependencies
    local                will copy current directory and all subdirs into builddir
-   tag <abc>		will checkout tag <abc> and build
+   tag <abc>            will checkout tag <abc> and build
 USAGE
                  shift
                  exit 0
-		 ;;
-		-n|--no-depend-check)
-		 BUILD_CHECK_DEP=NO
-		 shift
-		 ;;
-		local)
-		 BUILD_SRC=local
-		 shift
-		 ;;
-		tag)
-		 GIT_TAG=$2
-		 shift
-		 shift
-		 ;;
-	esac
+                 ;;
+                -n|--no-depend-check)
+                 BUILD_CHECK_DEP=NO
+                 shift
+                 ;;
+                local)
+                 BUILD_SRC=local
+                 shift
+                 ;;
+                tag)
+                 GIT_TAG=$2
+                 shift
+                 shift
+                 ;;
+        esac
 done
 #
 # build - prerequisites are documented in debian/control under build-depends
@@ -49,9 +49,9 @@ BUILD_DEPENDENCIES="build-essential autoconf flex bison libtool libncurses5-dev 
 
 if [[ "${BUILD_CHECK_DEP}" == "YES" ]]
 then
-	for dep in ${BUILD_DEPENDENCIES}; do
-		[[ ! $(apt-cache policy ${dep}) ]] && apt-get -y install ${dep}
-	done
+        for dep in ${BUILD_DEPENDENCIES}; do
+                [[ ! $(apt-cache policy ${dep}) ]] && apt-get -y install ${dep}
+        done
 fi
 #
 
@@ -82,16 +82,16 @@ cd ${BUILD_PARENT_DIR}
 
 if [[ "$BUILD_SRC" == "git" ]]
 then
-	git clone -b ${GIT_BRANCH} ${GIT_REPO} ${BUILD_DIR}
-	cd ${BUILD_DIR}
-	git clean -dxf
+        git clone -b ${GIT_BRANCH} ${GIT_REPO} ${BUILD_DIR}
+        cd ${BUILD_DIR}
+        git clean -dxf
 fi
 if [[ "$BUILD_SRC" == "local" ]]
 then
-	# DEV only
-	mkdir -p ${BUILD_DIR}
-	cd ${BUILD_DIR}
-	cp -r ${CUR_DIR}/* .
+        # DEV only
+        mkdir -p ${BUILD_DIR}
+        cd ${BUILD_DIR}
+        cp -r ${CUR_DIR}/* .
 fi
 
 # build the actual debian
