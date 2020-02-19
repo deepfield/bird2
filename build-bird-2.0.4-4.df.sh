@@ -15,13 +15,17 @@ BUILD_CHECK_DEP=YES
 while (( "$#" )); do
 	case "$1" in
 		-h|--help) 
-		 echo <<USAGE
-$0 [local] [tag abc]
+		 cat << USAGE
+$0 [local] [tag abc] [-n|--no-depend-check]
 
-   local 		will copy current directory and all subdirs into builddir
+   -n
+   --no-depend-check    skip checking build dependencies
+   local                will copy current directory and all subdirs into builddir
    tag <abc>		will checkout tag <abc> and build
 USAGE
-		;;
+                 shift
+                 exit 0
+		 ;;
 		-n|--no-depend-check)
 		 BUILD_CHECK_DEP=NO
 		 shift
