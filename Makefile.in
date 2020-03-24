@@ -41,7 +41,7 @@ objdir := @objdir@
 exedir := @exedir@
 
 #git-label:=$(strip $(shell cd $(srcdir) && [ "$$(git rev-parse --show-toplevel)" = "$$(readlink -f .)" ] && git describe --always --dirty=-x 2>/dev/null))
-git-label=2.0.4-3.df
+git-label=2.0.4-4.df
 ifneq ($(git-label),)
         CFLAGS += -DGIT_LABEL="$(git-label)"
 endif

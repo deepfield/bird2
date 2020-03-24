@@ -16,3 +16,6 @@
 /debian/.debhelper/
 *.deb
 .vscode/
+.idea
+bgpdump
+bgpdump2
