@@ -395,14 +395,32 @@ mrt_rib_table_header(struct mrt_table_dump_state *s, net_addr *n)
     mrt_put_u8(b, len);
     mrt_put_data(b, &a, BYTES(len));
   }
-  else
+  else if (n->type == NET_IP6)
   {
-    ASSERT(n->type == NET_IP6);
     ip6_addr a = ip6_hton(net6_prefix(n));
     uint len = net6_pxlen(n);
 
     mrt_put_u8(b, len);
     mrt_put_data(b, &a, BYTES(len));
+  }
+  else if (n->type == NET_VPN4)
+  {
+    /* RFC 4364
+       The labeled VPN-IPv4 NLRI itself is encoded as specified in
+   [MPLS-BGP], where the prefix consists of an 8-byte RD followed by an
+   IPv4 prefix.
+     */
+    ip4_addr a = ip4_hton(net4_prefix(n));
+    uint len = net4_pxlen(n);
+    uint64_t rd = net_rd(n);
+    mrt_put_data(b, &rd, 8);
+    mrt_put_u8(b, len);
+    mrt_put_data(b, &a, BYTES(len));
+
+  }
+  else 
+  {
+    return;
   }
 
   /* Entry Count, will be fixed later */
