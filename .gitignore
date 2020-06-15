@@ -16,6 +16,10 @@
 /debian/.debhelper/
 *.deb
 .vscode/
-.idea
+.idea/
+*.md5sum
 bgpdump
 bgpdump2
+*.mrt
+
+*.hex

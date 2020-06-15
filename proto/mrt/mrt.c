@@ -406,19 +406,38 @@ mrt_rib_table_header(struct mrt_table_dump_state *s, net_addr *n)
   else if (n->type == NET_VPN4)
   {
     /* RFC 4364
-       The labeled VPN-IPv4 NLRI itself is encoded as specified in
+       The labeled VPN-IPv6 NLRI itself is encoded as specified in
    [MPLS-BGP], where the prefix consists of an 8-byte RD followed by an
-   IPv4 prefix.
+   IPv6 prefix.
      */
     ip4_addr a = ip4_hton(net4_prefix(n));
     uint len = net4_pxlen(n);
+
     uint64_t rd = net_rd(n);
     mrt_put_data(b, &rd, 8);
+
+    mrt_put_u8(b, len);
+    mrt_put_data(b, &a, BYTES(len));
+  }
+  else if ( n->type == NET_VPN6)
+  {
+    /* RFC 4659
+       The NLRI field itself is encoded as specified in [MPLS-BGP].  In the
+   context of this extension, the prefix belongs to the VPN-IPv6 Address
+   Family and thus consists of an 8-octet Route Distinguisher followed
+   by an IPv6 prefix as specified in Section 2, above.
+    */
+    ip6_addr a = ip6_hton(net6_prefix(n));
+    uint len = net6_pxlen(n);
+
+    uint64_t rd = net_rd(n);
+    mrt_put_data(b, &rd, 8);
+
     mrt_put_u8(b, len);
     mrt_put_data(b, &a, BYTES(len));
 
   }
-  else 
+  else
   {
     return;
   }
@@ -511,6 +530,7 @@ mrt_rib_table_dump(struct mrt_table_dump_state *s, net *n, int add_path)
 {
   s->add_path = s->bws->add_path = add_path;
 
+  // TODO - decode proper table subtype for non ipv4/6 unicast tables
   int subtype = s->ipv4 ?
     (!add_path ? MRT_RIB_IPV4_UNICAST : MRT_RIB_IPV4_UNICAST_ADDPATH) :
     (!add_path ? MRT_RIB_IPV6_UNICAST : MRT_RIB_IPV6_UNICAST_ADDPATH);
