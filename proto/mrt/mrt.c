@@ -405,10 +405,10 @@ mrt_rib_table_header(struct mrt_table_dump_state *s, net_addr *n)
   }
   else if (n->type == NET_VPN4)
   {
-	// Store as RIB_GENERIC - AFI - 1 SAFI 128
-	// RFC4364 - BGP/MPLS IP Virtual Private Networks (VPNs)
-	// RFC8277 - BGP MPLS-Based Ethernet VPN
-	/*
+   /* 
+   // Store as RIB_GENERIC - AFI - 1 SAFI 128
+   // RFC4364 - BGP/MPLS IP Virtual Private Networks (VPNs)
+   // RFC8277 - BGP MPLS-Based Ethernet VPN
 	
         0                   1                   2                   3
         0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -423,28 +423,28 @@ mrt_rib_table_header(struct mrt_table_dump_state *s, net_addr *n)
        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 	*/
     mrt_put_u16( b, BGP_AFI_IPV4);
-	mrt_put_u8(b, BGP_SAFI_MPLS_VPN);
+    mrt_put_u8(b, BGP_SAFI_MPLS_VPN);
 
     /* RFC 4364
        The labeled VPN-IPv6 NLRI itself is encoded as specified in
-   [MPLS-BGP], where the prefix consists of an 8-byte RD followed by an
-   IPv6 prefix.
-     */
+       [MPLS-BGP], where the prefix consists of an 8-byte RD followed by an
+       IPv6 prefix.
+    */
     ip4_addr a = ip4_hton(net4_prefix(n));
-	// total length is length(prefix) + 3 bytes for 1 Label + 8 bytes for 1 rd in bits!
+    // total length is length(prefix) + 3 bytes for 1 Label + 8 bytes for 1 rd in bits!
     uint prefix_len = net4_pxlen(n);
-	uint len = prefix_len + (3 + 8) * 8;
+    uint len = prefix_len + (3 + 8) * 8;
     mrt_put_u8(b, len);
 
-	/* mpls label stack
-		0                   1                   2                   3
-		0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-		+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ Label
-		|                Label                  | Exp |S|       TTL     | Stack
-		+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ Entry
-	*/
-	mrt_put_u16( b, 0);
-	mrt_put_u8(b, 1); // ttl is stripped !
+    /* mpls label stack
+        0                   1                   2                   3
+        0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ Label
+        |                Label                  | Exp |S|       TTL     | Stack
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ Entry
+    */
+    mrt_put_u16( b, 0);
+    mrt_put_u8(b, 1); // ttl is stripped !
 
     uint64_t rd = net_rd(n);
     mrt_put_data(b, &rd, 8);
