@@ -1,7 +1,12 @@
 import collections
 import struct
 
-from df.mrtanalysis.analysis import MRTHeaderAnalyzer
+from df.mrtanalysis.analysis import (
+    MRTHeaderAnalyzer,
+    MRTV2RibTableAnalyzer,
+    MRTV2RibEntryAnalyzer,
+    MRTV2RibEntryGenericAnalyzer,
+)
 from df.mrtanalysis.util import Block
 
 
@@ -69,9 +74,41 @@ class MRTV2AsPath(object):
         self.data = []  # to make len work
 
 
+class MRTV2PeerIndexTable(object):
+
+    PIC = ">IPH"  # P is special indicates a pascal string for parsing
+
+    collector_id: str = None
+    view_name: str = None
+    peer_cout: int = None
+
+    def __init__(self, block: bytes):
+        if block:
+            self.unpack(block)
+
+    def unpack(self, block: bytes):
+        (self.collector_id) = struct.unpack_from(">I", block, 0)
+        (view_name_length) = struct.unpack_from(">H", block, 4)
+        self.view_name = block[7 : 7 + view_name_length].decode()
+        (self.peer_count) = struct.unpack_from(">H", block, 7 + view_name_length)
+
+
+class MRTV2RibTable(object):
+    ANALYZER = MRTV2RibTableAnalyzer
+
+    def __init__(self, block: bytes = None):
+        if block:
+            self.unpack(block)
+
+    def unpack(self, block: bytes):
+        pass
+
+
 class MRTV2RibEntry(object):
     """MRT V2 type RIB Entry"""
 
+    PIC: str = ">HIH"
+    ANALYZER = MRTV2
     """
     __hdr__ = (
         ('peer_index', 'h', 0),
@@ -89,7 +126,7 @@ class MRTV2RibEntry(object):
 
     def unpack(self, block):
         self.peer_index, self.originating_time, self.attribute_length = struct.unpack(
-            ">HIH", block[:8]
+            self.PIC, block[:8]
         )
         self.data = block[8:]
 
@@ -98,6 +135,24 @@ rib_ipv4_unicast = collections.namedtuple(
     "RIB_IPV4_Unicast",
     ["sequence_number", "ip_prefix", "entry_count", "re", "attributes"],
 )
+
+
+def build_entries(type: int, subtype: int, count: int) -> List[Any]:
+    """
+    given a type, subtype and count build the entries for the associated table
+
+    :param type: mrt type
+    :param subtype: mrt subtype
+    :param count: number of entries
+    :return: List of entries
+    """
+    if type == 13:
+        if subtype == 6:
+            result = MRTV2RibTable()
+
+        return []
+
+    return []
 
 
 class Indexer(object):
