@@ -1,0 +1,99 @@
+{
+        // Use IntelliSense to learn about possible attributes.
+        // Hover to view descriptions of existing attributes.
+        // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+        "version": "0.2.0",
+        "configurations": [
+                {
+                        "name": "(gdb) Debug Bird",
+                        "type": "cppdbg",
+                        "request": "launch",
+                        "program": "${workspaceFolder}/bird",
+                        "args": [
+                                "-d",
+                                "-f",
+                                "-c",
+                                "${workspaceFolder}/tools/df/conf/bird-mpls-vpn.conf"
+                        ],
+                        "stopAtEntry": false,
+                        "cwd": "${workspaceFolder}",
+                        "environment": [],
+                        "externalConsole": false,
+                        "MIMode": "gdb",
+                        "setupCommands": [
+                                {
+                                        "description": "Enable pretty-printing for gdb",
+                                        "text": "-enable-pretty-printing",
+                                        "ignoreFailures": true
+                                }
+                        ]
+                },
+                {
+                        "name": "Debug mrt-analysis mastervpn4",
+                        "type": "python",
+                        "request": "launch",
+                        "program": "tools/df/mrt_analysis.py",
+                        "args": [
+                                "--blockdump",
+                                "${workspaceFolder}/mastervpn4.mrt"
+                        ],
+                        "console": "integratedTerminal"
+                },
+                {
+                        "name": "Debug mrt-analysis open-bgp-table-v2",
+                        "type": "python",
+                        "request": "launch",
+                        "program": "tools/df/mrt_analysis.py",
+                        "args": [
+                                "--hexdump",
+                                "/home/support/mrtparse/samples/openbgpd_rib_table-v2"
+                        ],
+                        "console": "integratedTerminal"
+                },
+                {
+                        "name": "Python: Current File",
+                        "type": "python",
+                        "request": "launch",
+                        "program": "${file}",
+                        "console": "integratedTerminal"
+                },
+                {
+                        "name": "Python: analyze mastervpn4.mrt",
+                        "type": "python",
+                        "request": "launch",
+                        "program": "df/mrt_analysis.py",
+                        "console": "integratedTerminal",
+                        "cwd": "${workspaceFolder}/tools",
+                        "args": [
+                                "--bgp",
+                                "--seen",
+                                "--errors",
+                                "--hexdump",
+                                "mastervpn4.mrt"
+                        ]
+                },
+                {
+                        "name": "BIRD debug",
+                        "type": "cppdbg",
+                        "request": "launch",
+                        "program": "${workspaceFolder}/bird",
+                        "args": [
+                                "-d",
+                                "-c",
+                                "tools/df/conf/bird-mpls-vpn.conf"
+                        ],
+                        "stopAtEntry": false,
+                        "cwd": "${workspaceFolder}",
+                        "environment": [],
+                        "externalConsole": false,
+                        "MIMode": "gdb",
+                        "setupCommands": [
+                                {
+                                        "description": "Enable pretty-printing for gdb",
+                                        "text": "-enable-pretty-printing",
+                                        "ignoreFailures": true
+                                }
+                        ]
+                }
+        ]
+}

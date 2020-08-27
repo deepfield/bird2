@@ -1,0 +1,13 @@
+{
+        "[python]": {
+                "editor.insertSpaces": true,
+                "editor.tabSize": 4  
+        },
+        "python.pythonPath": "/pipedream/local/venv/deepfield-env/bin/python",
+        "extensions.confirmedUriHandlerExtensionIds": [
+        
+        ],
+        "python.formatting.provider": "black",
+        "terminal.integrated.fontSize": 10,
+        "debug.console.fontSize": 10
+}

@@ -1,0 +1,60 @@
+{
+        "tasks": [
+                {
+                        "type": "shell",
+                        "label": "build - make",
+                        "command": "make",
+                        "args": [],
+                        "options": {
+                                "cwd": "${workspaceFolder}"
+                        },
+                        "group": {
+                                "kind": "build",
+                                "isDefault": true
+                        },
+                        "problemMatcher": "$msCompile"
+                },
+                {
+                        "type": "shell",
+                        "label": "build - clean",
+                        "command": "make",
+                        "args": [
+                                "clean"
+                        ],
+                        "options": {
+                                "cwd": "${workspaceFolder}"
+                        },
+                        "group": "build",
+                        "problemMatcher": "$msCompile"
+                },
+                {
+                        "type": "shell",
+                        "label": "hexdump mastervpn4.txt",
+                        "command": "hexdump",
+                        "args": [
+                                "-C",
+                                "mastervpn4.mrt",
+                                ">mastervpn4.hexdump.txt"
+                        ],
+                        "options":{
+                                "cwd": "${workspaceFolder}"
+                        },
+                        "group": "build",
+                        "problemMatcher": "$msCompile"
+                },
+                {
+                        "type": "shell",
+                        "label": "build - debian local",
+                        "command": "tools/df/build/build-bird-2.0.4-6.df.sh",
+                        "args": [
+                                "local"
+                        ],
+                        "options": {
+                                "cwd": "${workspaceFolder}"
+                        },
+                        "group": "build",
+                        "problemMatcher": "$gcc"
+                }
+        ],
+        "version": "2.0.0"
+}

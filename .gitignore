@@ -15,11 +15,9 @@
 /debian/bird2/
 /debian/.debhelper/
 *.deb
-.vscode/
 .idea/
 *.md5sum
 bgpdump
 bgpdump2
 *.mrt
-
 *.hex
