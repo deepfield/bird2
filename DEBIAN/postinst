@@ -13,7 +13,7 @@ case "$1" in
     :
     bird6_binary="${SYSBIN_DIR}/bird6"
     if [ -f ${bird6_binary} ] ; then
-        rm ${bird6_binary}
+        rm ${bird6_binary}local
     fi
     birdc6_binary="${SYSBIN_DIR}/birdc6"
     if [ -f ${birdc6_binary} ] ; then
