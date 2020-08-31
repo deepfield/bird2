@@ -3,6 +3,8 @@ import ipaddress
 
 import explain_mrt.explain as TN
 
+import df.mrtanalysis.structure
+
 
 class TestMRTObject(unittest.TestCase):
     CT = TN.MRTObject
@@ -53,7 +55,7 @@ class TestMRTSubType(unittest.TestCase):
 
 
 class TestMRTHeader(unittest.TestCase):
-    CT = TN.MRTHeader
+    CT = df.mrtanalysis.structure.MRTHeader
 
     def test_init(self):
         actual = self.CT(0, 13, 4, 12, 12)
@@ -318,7 +320,7 @@ class TestMRTSection(unittest.TestCase):
                  b"\x00\x00\x64\x5e\x27\x66\x88"
         actual = self.CT.unpack_from(packed, 0, None)
         self.assertIsInstance(actual, self.CT)
-        self.assertIsInstance(actual.header, TN.MRTHeader)
+        self.assertIsInstance(actual.header, df.mrtanalysis.structure.MRTHeader)
         self.assertEqual((13, 1), actual.entry_type)
 
 

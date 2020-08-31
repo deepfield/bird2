@@ -395,14 +395,94 @@ mrt_rib_table_header(struct mrt_table_dump_state *s, net_addr *n)
     mrt_put_u8(b, len);
     mrt_put_data(b, &a, BYTES(len));
   }
-  else
+  else if (n->type == NET_IP6)
   {
-    ASSERT(n->type == NET_IP6);
     ip6_addr a = ip6_hton(net6_prefix(n));
     uint len = net6_pxlen(n);
 
     mrt_put_u8(b, len);
     mrt_put_data(b, &a, BYTES(len));
+  }
+  else if (n->type == NET_VPN4)
+  {
+   /* 
+   // Store as RIB_GENERIC - AFI - 1 SAFI 128
+   // RFC4364 - BGP/MPLS IP Virtual Private Networks (VPNs)
+   // RFC8277 - BGP MPLS-Based Ethernet VPN
+	
+        0                   1                   2                   3
+        0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |                         Sequence Number                       |
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |    Address Family Identifier  |Subsequent AFI |
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |     Network Layer Reachability Information (variable)         |
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |         Entry Count           |  RIB Entries (variable)
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+	*/
+    mrt_put_u16( b, BGP_AFI_IPV4);
+    mrt_put_u8(b, BGP_SAFI_MPLS_VPN);
+
+    /* RFC 4364
+       The labeled VPN-IPv6 NLRI itself is encoded as specified in
+       [MPLS-BGP], where the prefix consists of an 8-byte RD followed by an
+       IPv6 prefix.
+    */
+    ip4_addr a = ip4_hton(net4_prefix(n));
+    // total length is length(prefix) + 3 bytes for 1 Label + 8 bytes for 1 rd in bits!
+    uint prefix_len = net4_pxlen(n);
+    uint len = prefix_len + (3 + 8) * 8;
+    mrt_put_u8(b, len);
+
+    /* mpls label stack
+        0                   1                   2                   3
+        0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ Label
+        |                Label                  | Exp |S|       TTL     | Stack
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ Entry
+    */
+    mrt_put_u16( b, 0);
+    mrt_put_u8(b, 1); // ttl is stripped !
+
+    uint64_t rd = net_rd(n);
+    mrt_put_data(b, &rd, 8);
+
+    mrt_put_data(b, &a, BYTES(prefix_len));
+  }
+  else if ( n->type == NET_VPN6)
+  {
+    /* RFC 4659
+       The NLRI field itself is encoded as specified in [MPLS-BGP].  In the
+   context of this extension, the prefix belongs to the VPN-IPv6 Address
+   Family and thus consists of an 8-octet Route Distinguisher followed
+   by an IPv6 prefix as specified in Section 2, above.
+    */
+    ip6_addr a = ip6_hton(net6_prefix(n));
+    uint prefix_len = net6_pxlen(n);
+	uint len = prefix_len + (3 + 8) * 8;
+    mrt_put_u8(b, len);
+
+	/* mpls label stack
+		0                   1                   2                   3
+		0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+		+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ Label
+		|                Label                  | Exp |S|       TTL     | Stack
+		+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ Entry
+	*/
+	mrt_put_u16( b, 0);
+	mrt_put_u8(b, 1); // ttl is stripped !
+	
+    uint64_t rd = net_rd(n);
+    mrt_put_data(b, &rd, 8);
+
+    mrt_put_data(b, &a, BYTES(prefix_len));
+
+  }
+  else
+  {
+    return;
   }
 
   /* Entry Count, will be fixed later */
@@ -493,6 +573,7 @@ mrt_rib_table_dump(struct mrt_table_dump_state *s, net *n, int add_path)
 {
   s->add_path = s->bws->add_path = add_path;
 
+  // TODO - decode proper table subtype for non ipv4/6 unicast tables
   int subtype = s->ipv4 ?
     (!add_path ? MRT_RIB_IPV4_UNICAST : MRT_RIB_IPV4_UNICAST_ADDPATH) :
     (!add_path ? MRT_RIB_IPV6_UNICAST : MRT_RIB_IPV6_UNICAST_ADDPATH);
