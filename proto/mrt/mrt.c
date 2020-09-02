@@ -426,9 +426,9 @@ mrt_rib_table_header(struct mrt_table_dump_state *s, net_addr *n)
     mrt_put_u8(b, BGP_SAFI_MPLS_VPN);
 
     /* RFC 4364
-       The labeled VPN-IPv6 NLRI itself is encoded as specified in
+       The labeled VPN-IPv4 NLRI itself is encoded as specified in
        [MPLS-BGP], where the prefix consists of an 8-byte RD followed by an
-       IPv6 prefix.
+       IPv4 prefix.
     */
     ip4_addr a = ip4_hton(net4_prefix(n));
     // total length is length(prefix) + 3 bytes for 1 Label + 8 bytes for 1 rd in bits!
@@ -442,6 +442,8 @@ mrt_rib_table_header(struct mrt_table_dump_state *s, net_addr *n)
         +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ Label
         |                Label                  | Exp |S|       TTL     | Stack
         +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ Entry
+
+        we are writing a null label right now - the only thing that matters is the stop bit
     */
     mrt_put_u16( b, 0);
     mrt_put_u8(b, 1); // ttl is stripped !
@@ -470,6 +472,8 @@ mrt_rib_table_header(struct mrt_table_dump_state *s, net_addr *n)
 		+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ Label
 		|                Label                  | Exp |S|       TTL     | Stack
 		+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ Entry
+
+        we are writing a null label right now - the only thing that matters is the stop bit
 	*/
 	mrt_put_u16( b, 0);
 	mrt_put_u8(b, 1); // ttl is stripped !
@@ -573,10 +577,22 @@ mrt_rib_table_dump(struct mrt_table_dump_state *s, net *n, int add_path)
 {
   s->add_path = s->bws->add_path = add_path;
 
-  // TODO - decode proper table subtype for non ipv4/6 unicast tables
-  int subtype = s->ipv4 ?
-    (!add_path ? MRT_RIB_IPV4_UNICAST : MRT_RIB_IPV4_UNICAST_ADDPATH) :
-    (!add_path ? MRT_RIB_IPV6_UNICAST : MRT_RIB_IPV6_UNICAST_ADDPATH);
+  int subtype = MRT_RIB_IPV4_UNICAST;
+  switch (n->n.addr->type) {
+  case NET_IP4:
+    subtype = (!add_path ? MRT_RIB_IPV4_UNICAST : MRT_RIB_IPV4_UNICAST_ADDPATH);
+    break;
+  case NET_IP6:
+    subtype = (!add_path ? MRT_RIB_IPV6_UNICAST : MRT_RIB_IPV6_UNICAST_ADDPATH);
+    break;
+  case NET_VPN4:
+  case NET_VPN6:
+    subtype = MRT_RIB_GENERIC;
+    break;
+  default:
+    return;
+    break;
+  }
 
   mrt_init_message(&s->buf, MRT_TABLE_DUMP_V2, subtype);
   mrt_rib_table_header(s, n->n.addr);
