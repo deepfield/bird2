@@ -72,28 +72,5 @@
                                 "mastervpn4.mrt"
                         ]
                 },
-                {
-                        "name": "BIRD debug",
-                        "type": "cppdbg",
-                        "request": "launch",
-                        "program": "${workspaceFolder}/bird",
-                        "args": [
-                                "-d",
-                                "-c",
-                                "tools/df/conf/bird-mpls-vpn.conf"
-                        ],
-                        "stopAtEntry": false,
-                        "cwd": "${workspaceFolder}",
-                        "environment": [],
-                        "externalConsole": false,
-                        "MIMode": "gdb",
-                        "setupCommands": [
-                                {
-                                        "description": "Enable pretty-printing for gdb",
-                                        "text": "-enable-pretty-printing",
-                                        "ignoreFailures": true
-                                }
-                        ]
-                }
         ]
 }

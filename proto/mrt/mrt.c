@@ -448,7 +448,7 @@ mrt_rib_table_header(struct mrt_table_dump_state *s, net_addr *n)
     mrt_put_u16( b, 0);
     mrt_put_u8(b, 1); // ttl is stripped !
 
-    uint64_t rd = net_rd(n);
+    uint64_t rd = ((net_addr_vpn4 *)n)->rd;
     mrt_put_data(b, &rd, 8);
 
     mrt_put_data(b, &a, BYTES(prefix_len));
@@ -478,7 +478,7 @@ mrt_rib_table_header(struct mrt_table_dump_state *s, net_addr *n)
 	mrt_put_u16( b, 0);
 	mrt_put_u8(b, 1); // ttl is stripped !
 	
-    uint64_t rd = net_rd(n);
+    uint64_t rd = ((net_addr_vpn6 *)n)->rd;
     mrt_put_data(b, &rd, 8);
 
     mrt_put_data(b, &a, BYTES(prefix_len));
