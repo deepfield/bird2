@@ -72,5 +72,20 @@
                                 "mastervpn4.mrt"
                         ]
                 },
+                {
+                        "name": "Python: analyze i2-lab vpn4.mrt",
+                        "type": "python",
+                        "request": "launch",
+                        "program": "df/mrt_analysis.py",
+                        "console": "integratedTerminal",
+                        "cwd": "${workspaceFolder}/tools",
+                        "args": [
+                                "--bgp",
+                                "--seen",
+                                "--errors",
+                                "--hexdump",
+                                "/pipedream/hood/mrt-vpn/bgp/dumps/local_bgpdump.65150.10.39.8.7.vpn4.mrt"
+                        ]
+                },
         ]
 }

@@ -21,3 +21,4 @@ bgpdump
 bgpdump2
 *.mrt
 *.hex
+__pycache__/

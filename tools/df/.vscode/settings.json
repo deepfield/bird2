@@ -1,0 +1,33 @@
+{
+        "python.pythonPath": "/pipedream/local/venv/deepfield-env/bin/python",
+        "python.testing.pytestArgs": [
+                "test_mrt_text_entry.py"
+        ],
+        "python.testing.unittestEnabled": false,
+        "python.testing.nosetestsEnabled": false,
+        "python.testing.pytestEnabled": true,
+        "python.linting.flake8Enabled": true,
+        "python.linting.enabled": true,
+        "editor.tokenColorCustomizations": {
+                "textMateRules": [
+                        {
+                                "scope": "googletest.failed",
+                                "settings": {
+                                        "foreground": "#f00"
+                                }
+                        },
+                        {
+                                "scope": "googletest.passed",
+                                "settings": {
+                                        "foreground": "#0f0"
+                                }
+                        },
+                        {
+                                "scope": "googletest.run",
+                                "settings": {
+                                        "foreground": "#0f0"
+                                }
+                        }
+                ]
+        }
+}

@@ -1,7 +1,7 @@
 import ipaddress
 import struct
 
-from df.mrtanalysis.util import Block
+from .util import Block
 
 
 class BGPAttribute(object):

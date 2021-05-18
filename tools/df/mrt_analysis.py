@@ -1,6 +1,6 @@
 import argparse
+from .mrtanalysis.analysis import Analysis
 
-from df.mrtanalysis.analysis import Analysis
 
 def parse_args():
     parser = argparse.ArgumentParser()

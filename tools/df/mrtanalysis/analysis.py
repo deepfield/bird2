@@ -4,10 +4,10 @@ from typing import Dict, Any, Tuple, List, Union, Optional, Callable
 import arrow
 import ipaddress
 
-from df.mrtanalysis.util import hexline, Block
-from df.mrtanalysis.progress import TimedProgressReporter
-from df.mrtanalysis.bgp import RouteIPV4, BGPAttribute
-from df.mrtanalysis.structure import Indexer, MRTV2RibEntry, MRTV2AsPath, rib_ipv4_unicast, MRTHeader
+from .util import hexline, Block
+from .progress import TimedProgressReporter
+from .bgp import RouteIPV4, BGPAttribute
+from .structure import Indexer, MRTV2RibEntry, MRTV2AsPath, rib_ipv4_unicast, MRTHeader
 
 MRTHeaderTypes = {
     0: "NULL (DEPRECATED)	[RFC6396]",
@@ -87,9 +87,9 @@ def analyze(
             if attr and hasattr(obj, attr):
                 value = getattr(obj, attr)
             else:
-                if c == "P": # special pascal type string
-                    (length) = struct.unpack( ">H", block[ offset: offset + 2])
-                    value = bytes[ offset + 2: offset + 2 + length].decode()
+                if c == "P":  # special pascal type string
+                    (length) = struct.unpack(">H", block[offset : offset + 2])
+                    value = bytes[offset + 2 : offset + 2 + length].decode()
                 else:
                     value = struct.unpack(">" + c, block[offset : offset + nbytes])
             if lookup:
@@ -107,6 +107,7 @@ def analyze(
 
     return (offset, lines)
 
+
 class Analyzer(object):
     pic: str = None
     format: Dict[int, Union[str, Dict]] = None
@@ -122,14 +123,12 @@ class Analyzer(object):
         return analyze(self.pic, self.format, self.obj, block, addr)
 
 
-def get_analyzer_class(mrt_header:MRTHeader) -> Analyzer:
+def get_analyzer_class(mrt_header: MRTHeader) -> Analyzer:
     type: int = mrt_header.type
     subtype: int = mrt_header.subtype
 
     type_dict: Optional[Dict[int, Analyzer]] = {
-        13: {
-            1: MRTV2PeerIndexTableAnalyzer,
-        }
+        13: {1: MRTV2PeerIndexTableAnalyzer}
     }.get(type)
     if type is None:
         raise RuntimeError(f"No analyzer for mrt table type {type}")
@@ -141,13 +140,13 @@ def get_analyzer_class(mrt_header:MRTHeader) -> Analyzer:
     return subtype_analyzer
 
 
-
 class MRTAnalyzer(Analyzer):
     def __init__(self, obj: Any, fmt: Dict):
         Analyzer.__init__(self, obj, fmt)
 
     def analyze(self, block: bytes, addr: int) -> Tuple[int, List[str]]:
         return super().analyze(block, addr)
+
 
 class MRTHeaderAnalyzer(MRTAnalyzer):
     """
@@ -163,6 +162,7 @@ class MRTHeaderAnalyzer(MRTAnalyzer):
            |                      Message... (variable)
            +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
     """
+
     format: Dict[int, Dict] = {
         1: {
             "attr": "ts",
@@ -217,6 +217,7 @@ class MRTV2PeerIndexTableAnalyzer(MRTV2TableAnalyzer):
        |          Peer Count           |    Peer Entries (variable)
        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
     """
+
     format: Dict[int, Dict] = {
         1: {
             "attr": "collector_id",
@@ -300,7 +301,7 @@ def get_stats_value(stat_item, category, key):
 def analyze_payload(mrt_header: MRTHeader, payload: bytes, addr: int) -> Analyzer:
     the_class = get_analyzer_class(mrt_header)
 
-    return the_class(obj, the_class.format, ).analyze(payload, addr)
+    return the_class(obj, the_class.format).analyze(payload, addr)
 
 
 class Analysis(object):
@@ -677,8 +678,6 @@ class Analysis(object):
             payload_block = self.indexer.payload_block(i)
             (offset, output) = analyze_payload(mrt_header, payload_block, addr)
             addr += offset
-
-
 
     def report(self, args):
         print("Statistical analyis")

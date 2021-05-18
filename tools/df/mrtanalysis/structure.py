@@ -1,21 +1,24 @@
 import collections
 import struct
 
-from df.mrtanalysis.analysis import (
+from .decorators import Analyzer
+
+from .analysis import (
     MRTHeaderAnalyzer,
     MRTV2RibTableAnalyzer,
     MRTV2RibEntryAnalyzer,
     MRTV2RibEntryGenericAnalyzer,
 )
-from df.mrtanalysis.util import Block
+
+from .util import Block
 
 
+@Analyzer(MRTHeaderAnalyzer)
 class MRTHeader(object):
     """ a replacement for dpkt.mrt.MRTHeader"""
 
     HEADER_LENGTH: int = 12
     PIC: str = ">IHHI"
-    ANALYZER = MRTHeaderAnalyzer
 
     def __init__(self, block=None):
         self.ts = 0
@@ -29,6 +32,7 @@ class MRTHeader(object):
         self.ts, self.type, self.subtype, self.len = struct.unpack(self.PIC, block[:12])
 
 
+@Analyzer(None)
 class MRTV2AsPath(object):
     """AS4 as path object """
 
@@ -74,13 +78,14 @@ class MRTV2AsPath(object):
         self.data = []  # to make len work
 
 
+@Analyzer(None)
 class MRTV2PeerIndexTable(object):
 
     PIC = ">IPH"  # P is special indicates a pascal string for parsing
 
     collector_id: str = None
     view_name: str = None
-    peer_cout: int = None
+    peer_count: int = None
 
     def __init__(self, block: bytes):
         if block:
@@ -93,9 +98,8 @@ class MRTV2PeerIndexTable(object):
         (self.peer_count) = struct.unpack_from(">H", block, 7 + view_name_length)
 
 
+@Analyzer(MRTV2RibTableAnalyzer)
 class MRTV2RibTable(object):
-    ANALYZER = MRTV2RibTableAnalyzer
-
     def __init__(self, block: bytes = None):
         if block:
             self.unpack(block)
@@ -104,11 +108,11 @@ class MRTV2RibTable(object):
         pass
 
 
+@Analyzer(MRTV2RibEntryAnalyzer)
 class MRTV2RibEntry(object):
     """MRT V2 type RIB Entry"""
 
     PIC: str = ">HIH"
-    ANALYZER = MRTV2
     """
     __hdr__ = (
         ('peer_index', 'h', 0),

@@ -1,0 +1,26 @@
+{
+        // Use IntelliSense to learn about possible attributes.
+        // Hover to view descriptions of existing attributes.
+        // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+        "version": "0.2.0",
+        "configurations": [
+                {
+                        "name": "build mrt from text",
+                        "type": "python",
+                        "request": "launch",
+                        "program": "mrt_build_from_text.py",
+                        "args":[
+                                "-v",
+                                "test_data/local_bgpdump.5472.198.108.63.60.txt.gz"
+                        ],
+                        "console": "integratedTerminal"
+                },
+                {
+                        "name": "test_mrt_text_entry.py",
+                        "type": "python",
+                        "request": "launch",
+                        "program": "test_mrt_text_entry.py",
+                        "console": "integratedTerminal"
+                }
+        ]
+}
