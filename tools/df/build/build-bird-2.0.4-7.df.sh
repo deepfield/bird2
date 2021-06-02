@@ -11,7 +11,7 @@ BUILD_CHECK_DEP=YES
 # argument handling 
 # ./build-bird2-2.0.4-6-df.sh local   - will build local
 # ./build-bird2-2.0.4-6-df.sh tag 2.0.4-3 - will build 2.0.4-3 tag
-GIT_TAG=2.0.4-6.df
+GIT_TAG=2.0.4-7.df
 
 while (( "$#" )); do
         case "$1" in
@@ -58,7 +58,7 @@ fi
 
 PKG_NAME=bird2
 PKG_VERSION=2.0.4
-PKG_REV=6.df
+PKG_REV=7.df
 PKG_ARCH=amd64
 
 VERSION=${PKG_VERSION}-${PKG_REV}
