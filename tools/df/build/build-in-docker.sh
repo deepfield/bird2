@@ -2,7 +2,7 @@
 # this runs the build-bird script in a container  (possibly having cached all the build dependencies)
 #
 CONTAINER=bird-build
-GIT_TAG="${1:-2.0.4-6.df}"
+GIT_TAG="${1:-2.0.4-7.df}"
 ARCH=amd64
 # clear the source directory in the container
 docker exec $CONTAINER bash -c 'cd /home/support && rm -rf bird2 && mkdir -p bird2'
