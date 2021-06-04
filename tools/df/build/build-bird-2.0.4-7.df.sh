@@ -10,7 +10,7 @@ BUILD_SRC=git
 BUILD_CHECK_DEP=YES
 # argument handling 
 # ./build-bird2-2.0.4-6-df.sh local   - will build local
-# ./build-bird2-2.0.4-6-df.sh tag 2.0.4-3 - will build 2.0.4-3 tag
+# ./build-bird2-2.0.4-6-df.sh tag -3 - will build 2.0.4-3 tag
 GIT_TAG=2.0.4-7.df
 
 while (( "$#" )); do

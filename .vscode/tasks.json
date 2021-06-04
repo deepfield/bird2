@@ -45,7 +45,7 @@
                 {
                         "type": "shell",
                         "label": "build - debian local",
-                        "command": "tools/df/build/build-bird-2.0.4-6.df.sh",
+                        "command": "tools/df/build/build-bird-2.0.4-7.df.sh",
                         "args": [
                                 "local"
                         ],
