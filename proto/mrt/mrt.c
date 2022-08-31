@@ -553,6 +553,14 @@ mrt_rib_table_entry(struct mrt_table_dump_state *s, rte *r)
          */
         if ( 16 == next_hop->u.ptr->length ) {
            ip6_addr *addr = (void *) s->bws->mp_next_hop->u.ptr->data;
+           if (32 == next_hop->u.ptr->length) {
+             ip6_addr *addr2 = (void *) (s->bws->mp_next_hop->u.ptr->data + 16);
+             // if ipv6 addr starts with 0xFE80, it's a link local address instead of nexthop
+             if ((addr->addr[0] & 0xFFFF0000) == 0xFE800000 && (addr2->addr[0] & 0xFFFF0000) != 0xFE800000) {
+                 addr == addr2;
+             }
+           }
+
            *end_attr_buf = next_hop->flags;
            *(end_attr_buf+1) = BA_MP_REACH_NLRI;
            /* don't have to write afi, safi - they are implied by rib table */
