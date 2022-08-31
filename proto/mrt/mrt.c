@@ -553,6 +553,7 @@ mrt_rib_table_entry(struct mrt_table_dump_state *s, rte *r)
          */
         if ( 16 == next_hop->u.ptr->length || 32 == next_hop->u.ptr->length) {
            ip6_addr *addr = (void *) s->bws->mp_next_hop->u.ptr->data;
+           // this is when the neighbor router is misbehaving - sending 2 nexthops is not really allowed by bgp
            if (32 == next_hop->u.ptr->length) {
              ip6_addr *addr2 = (void *) (s->bws->mp_next_hop->u.ptr->data + 16);
              // if ipv6 addr starts with 0xFE80, it's a link local address instead of nexthop
