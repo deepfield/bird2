@@ -551,7 +551,7 @@ mrt_rib_table_entry(struct mrt_table_dump_state *s, rte *r)
          * mp_next_hop is always encoded as ipv6 even when it's an ipv4
          * write mp_next_hop as an MP_REACH_NLRI field
          */
-        if ( 16 == next_hop->u.ptr->length ) {
+        if ( 16 == next_hop->u.ptr->length || 32 == next_hop->u.ptr->length) {
            ip6_addr *addr = (void *) s->bws->mp_next_hop->u.ptr->data;
            if (32 == next_hop->u.ptr->length) {
              ip6_addr *addr2 = (void *) (s->bws->mp_next_hop->u.ptr->data + 16);
