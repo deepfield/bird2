@@ -558,7 +558,7 @@ mrt_rib_table_entry(struct mrt_table_dump_state *s, rte *r)
              ip6_addr *addr2 = (void *) (s->bws->mp_next_hop->u.ptr->data + 16);
              // if ipv6 addr starts with 0xFE80, it's a link local address instead of nexthop
              if ((addr->addr[0] & 0xFFFF0000) == 0xFE800000 && (addr2->addr[0] & 0xFFFF0000) != 0xFE800000) {
-                 addr == addr2;
+                 addr = addr2;
              }
            }
 
