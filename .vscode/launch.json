@@ -5,6 +5,22 @@
         "version": "0.2.0",
         "configurations": [
                 {
+                        "type": "bashdb",
+                        "request": "launch",
+                        "name": "Bash-Debug (type in script name)",
+                        "cwd": "${workspaceFolder}",
+                        "program": "${command:AskForScriptName}",
+                        "args": []
+                },
+                {
+                        "type": "bashdb",
+                        "request": "launch",
+                        "name": "Bash-Debug (hardcoded script name)",
+                        "cwd": "${workspaceFolder}",
+                        "program": "${workspaceFolder}/tools/df/conf/mitigations/transform.sh",
+                        "args": []
+                },
+                {
                         "name": "(gdb) Debug Bird",
                         "type": "cppdbg",
                         "request": "launch",
@@ -58,18 +74,18 @@
                         "console": "integratedTerminal"
                 },
                 {
-                        "name": "Python: analyze mastervpn4.mrt",
+                        "name": "Python: analyze 17676.ipv6.mrt",
                         "type": "python",
                         "request": "launch",
-                        "program": "df/mrt_analysis.py",
+                        "program": "mrt_analysis.py",
                         "console": "integratedTerminal",
-                        "cwd": "${workspaceFolder}/tools",
+                        "cwd": "${workspaceFolder}/tools/df",
                         "args": [
                                 "--bgp",
                                 "--seen",
                                 "--errors",
                                 "--hexdump",
-                                "mastervpn4.mrt"
+                                "local_bgpdump.17676.10.216.15.14.ipv6.mrt"
                         ]
                 },
         ]

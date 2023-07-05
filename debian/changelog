@@ -1,5 +1,6 @@
-bird2 (2.0.4-7.df) released; urgency=medium
+bird2 (2.0.4-9.df) released; urgency=medium
 
   [ deepfield-syseng ]
   * first release
+  * added correct network byte ordering of vpn rd's (type = 1)
  -- deepfield-syseng <syseng@deepfield.net>  Mon, 25 Mar 2019 15:48:15 -0400

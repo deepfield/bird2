@@ -8,6 +8,6 @@
         
         ],
         "python.formatting.provider": "black",
-        "terminal.integrated.fontSize": 10,
-        "debug.console.fontSize": 10
+        "terminal.integrated.fontSize": 14,
+        "debug.console.fontSize": 14
 }
