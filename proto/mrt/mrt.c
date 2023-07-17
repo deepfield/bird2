@@ -372,6 +372,46 @@ mrt_peer_table_flush(struct mrt_table_dump_state *s)
   HASH_FREE(s->peer_hash);
 }
 
+static u64
+mrt_make_rd_u64(u64 nw_rd) {
+  // we take a network order rd (nw_rd) 
+  // and if it is of the type <ip address>:int
+  // we will adjust the ip part to network order (so that libbgpdump convert it back to host order)
+   /* from bgpdump_lib.c
+      switch (rd >> 48)
+  {
+    case 0: 
+      snprintf(buf, buflen, "%u:%u", (uint32_t) (rd >> 32), (uint32_t) rd);
+      break;
+    case 1: {
+      uint32_t ip = (uint32_t)(rd >>16);
+      char ip_buf[ 32];
+      inet_ntop( AF_INET, &ip, ip_buf, sizeof(ip_buf));
+      snprintf(buf, buflen, "%s:%u", ip_buf, (uint32_t) (rd & 0xffff));
+      }
+      break;
+    case 2:
+      if (((uint32_t) (rd >> 16)) >> 16)
+	snprintf(buf, buflen, "%u:%u", (uint32_t) (rd >> 16), (uint32_t) (rd & 0xffff));
+      else
+	snprintf(buf, buflen, "2:%u:%u", (uint32_t) (rd >> 16), (uint32_t) (rd & 0xffff));
+      break;
+    default: 
+      snprintf(buf, buflen, "X:%08x:%08x", (uint32_t) (rd >> 32), (uint32_t) rd);
+      break;
+  }    */
+  u64 rd = nw_rd;
+  switch ( nw_rd >> 48) {
+    case 1: {
+      u32 ip_a_n = htonl((uint32_t)(nw_rd >> 16));
+      rd = ( 1ul << 48 | ((u64) ip_a_n) << 16 | nw_rd & 0xffff);
+      break;
+    }
+    default:
+      break;
+  }
+  return rd;
+}
 
 /*
  *	MRT Table Dump: RIB Table
@@ -405,23 +445,23 @@ mrt_rib_table_header(struct mrt_table_dump_state *s, net_addr *n)
   }
   else if (n->type == NET_VPN4)
   {
-   /* 
-   // Store as RIB_GENERIC - AFI - 1 SAFI 128
-   // RFC4364 - BGP/MPLS IP Virtual Private Networks (VPNs)
-   // RFC8277 - BGP MPLS-Based Ethernet VPN
-	
-        0                   1                   2                   3
-        0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-       |                         Sequence Number                       |
-       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-       |    Address Family Identifier  |Subsequent AFI |
-       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-       |     Network Layer Reachability Information (variable)         |
-       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-       |         Entry Count           |  RIB Entries (variable)
-       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-	*/
+    /* 
+    // Store as RIB_GENERIC - AFI - 1 SAFI 128
+    // RFC4364 - BGP/MPLS IP Virtual Private Networks (VPNs)
+    // RFC8277 - BGP MPLS-Based Ethernet VPN
+    
+          0                   1                   2                   3
+          0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+        |                         Sequence Number                       |
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+        |    Address Family Identifier  |Subsequent AFI |
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+        |     Network Layer Reachability Information (variable)         |
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+        |         Entry Count           |  RIB Entries (variable)
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    */
     mrt_put_u16( b, BGP_AFI_IPV4);
     mrt_put_u8(b, BGP_SAFI_MPLS_VPN);
 
@@ -448,7 +488,7 @@ mrt_rib_table_header(struct mrt_table_dump_state *s, net_addr *n)
     mrt_put_u16( b, 0);
     mrt_put_u8(b, 1); // ttl is stripped !
 
-    uint64_t rd = ((net_addr_vpn4 *)n)->rd;
+    u64 rd = mrt_make_rd_u64(((net_addr_vpn4 *)n)->rd);
     mrt_put_data(b, &rd, 8);
 
     mrt_put_data(b, &a, BYTES(prefix_len));
@@ -463,22 +503,22 @@ mrt_rib_table_header(struct mrt_table_dump_state *s, net_addr *n)
     */
     ip6_addr a = ip6_hton(net6_prefix(n));
     uint prefix_len = net6_pxlen(n);
-	uint len = prefix_len + (3 + 8) * 8;
+	  uint len = prefix_len + (3 + 8) * 8;
     mrt_put_u8(b, len);
 
-	/* mpls label stack
-		0                   1                   2                   3
-		0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-		+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ Label
-		|                Label                  | Exp |S|       TTL     | Stack
-		+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ Entry
+    /* mpls label stack
+      0                   1                   2                   3
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ Label
+      |                Label                  | Exp |S|       TTL     | Stack
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ Entry
 
-        we are writing a null label right now - the only thing that matters is the stop bit
-	*/
-	mrt_put_u16( b, 0);
-	mrt_put_u8(b, 1); // ttl is stripped !
+          we are writing a null label right now - the only thing that matters is the stop bit
+    */
+    mrt_put_u16( b, 0);
+    mrt_put_u8(b, 1); // ttl is stripped !
 	
-    uint64_t rd = ((net_addr_vpn6 *)n)->rd;
+    u64 rd = mrt_make_rd_u64(((net_addr_vpn6 *)n)->rd);
     mrt_put_data(b, &rd, 8);
 
     mrt_put_data(b, &a, BYTES(prefix_len));
