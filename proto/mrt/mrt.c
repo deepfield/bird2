@@ -495,6 +495,9 @@ mrt_rib_table_header(struct mrt_table_dump_state *s, net_addr *n)
   }
   else if ( n->type == NET_VPN6)
   {
+    // same to ipv4: Store as RIB_GENERIC - AFI - 2 SAFI 128
+    mrt_put_u16( b, BGP_AFI_IPV6);
+    mrt_put_u8(b, BGP_SAFI_MPLS_VPN);
     /* RFC 4659
        The NLRI field itself is encoded as specified in [MPLS-BGP].  In the
    context of this extension, the prefix belongs to the VPN-IPv6 Address
