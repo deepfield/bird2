@@ -12,7 +12,7 @@ assert() {
 
     actual=$(cut -f$fieldnum '-d|' $file)
 
-    msg="$file: $fieldname{fn=$fieldnum) was ($actual) not ($expected)"
+    msg="$file: $fieldname(fn=$fieldnum) was ($actual) not ($expected)"
 
     # a kludge but right now comparing everything as string is ok
     [ "$actual" != "$expected" ] && fail "$msg"
@@ -88,15 +88,17 @@ assert $file "nexthop" $FN_NEXTHOP "::172.27.0.6"
 assert $file "community" $FN_COMMUNITY "65535:65284"
 
 # vpn4
+# field indexes are off there is an extra field (rd) in here
+# so anything above and including CIDR 
 file=testvpn4.txt
 [ ! -e $file ] && fail "ipv6 mpls test output does not exist"
 assert $file "neighbor" $FN_NEIGHBOR $neighbor
 assert $file "neighbor_asn" $FN_NEIGHBOR_ASN $neighbor_asn
-assert $file "route cidr" $FN_CIDR "8.8.8.0/24"
-assert $file "aspath" $FN_ASPATH "65002"
-assert $file "origin" $FN_ORIGIN "INCOMPLETE"
-assert $file "nexthop" $FN_NEXTHOP "::172.27.0.6"
-assert $file "community" $FN_COMMUNITY "65535:65284"
+assert $file "route cidr" 7 "8.8.8.0/24"
+assert $file "aspath" 8 "65002"
+assert $file "origin" 9 "INCOMPLETE"
+assert $file "nexthop" 10 "::172.27.0.6"
+assert $file "community" 11 "65535:65284"
 
 # vpn6
 # field indexes are off there is an extra field in here
@@ -104,10 +106,10 @@ file=testvpn6.txt
 [ ! -e $file ] && fail "ipv6 mpls test output does not exist"
 assert $file "neighbor" $FN_NEIGHBOR $neighbor
 assert $file "neighbor_asn" $FN_NEIGHBOR_ASN $neighbor_asn
-assert $file "route cidr" $FN_CIDR "2001:555:dead:beef::/128"
-assert $file "aspath" $FN_ASPATH "65002"
-assert $file "origin" $FN_ORIGIN "INCOMPLETE"
-assert $file "nexthop" $FN_NEXTHOP "::172.27.0.6"
-assert $file "community" $FN_COMMUNITY "65535:65284"
+assert $file "route cidr" 7 "2001:555:dead:beef::/128"
+assert $file "aspath" 8 "65002"
+assert $file "origin" 9 "INCOMPLETE"
+assert $file "nexthop" 10 "::172.27.0.6"
+assert $file "community" 11 "65535:65284"
 
 echo "All tests passed"
