@@ -10,7 +10,7 @@ assert() {
     fieldnum="$3"
     expected="$4"
 
-    actual=$(cut -f$fieldnum '-d|' $file)
+    actual=$(tail -n 1 $file | cut -f$fieldnum '-d|')
 
     msg="$file: $fieldname(fn=$fieldnum) was ($actual) not ($expected)"
 
@@ -91,25 +91,35 @@ assert $file "community" $FN_COMMUNITY "65535:65284"
 # field indexes are off there is an extra field (rd) in here
 # so anything above and including CIDR 
 file=testvpn4.txt
-[ ! -e $file ] && fail "ipv6 mpls test output does not exist"
+[ ! -e $file ] && fail "vpn4 test output does not exist"
 assert $file "neighbor" $FN_NEIGHBOR $neighbor
 assert $file "neighbor_asn" $FN_NEIGHBOR_ASN $neighbor_asn
-assert $file "route cidr" 7 "8.8.8.0/24"
-assert $file "aspath" 8 "65002"
+assert $file "rd" 6 "100:100"
+# the vpnv4 mask;em includes the preceeding rd
+# so /24 + 24 (3 * 8) for a null mpls label + 64 bit for the rd
+# 64 + 48 = 112
+assert $file "route cidr" 7 "8.8.8.0/112"
+assert $file "aspath" 8 "65002 6919 16534"
 assert $file "origin" 9 "INCOMPLETE"
-assert $file "nexthop" 10 "::172.27.0.6"
-assert $file "community" 11 "65535:65284"
+# nexthop is extended nexthop NLRI
+assert $file "nexthop" 10 "::ffff:172.22.0.0"
+assert $file "community" 13 "no-export no-advertise"
 
 # vpn6
 # field indexes are off there is an extra field in here
 file=testvpn6.txt
-[ ! -e $file ] && fail "ipv6 mpls test output does not exist"
+[ ! -e $file ] && fail "vpn6 test output does not exist"
 assert $file "neighbor" $FN_NEIGHBOR $neighbor
 assert $file "neighbor_asn" $FN_NEIGHBOR_ASN $neighbor_asn
-assert $file "route cidr" 7 "2001:555:dead:beef::/128"
+assert $file "rd" 6 "65002:100"
+# the vpn6 mask includes the preceeding rd
+# so /128 + 24 (3*8) for a  null mpls label + 64 bit for the rd
+# 128 + 64 + 24 = 216 
+assert $file "route cidr" 7 "2001:555:dead:beef::/216"
 assert $file "aspath" 8 "65002"
 assert $file "origin" 9 "INCOMPLETE"
+# nexthop is extended nexthop NLRI
 assert $file "nexthop" 10 "::172.27.0.6"
-assert $file "community" 11 "65535:65284"
+assert $file "community" 13 "no-export no-advertise 65535:65284"
 
 echo "All tests passed"
