@@ -110,7 +110,6 @@ static inline void
 mrt_buffer_flush(buffer *b)
 {
   b->pos = b->start;
-
 }
 
 #define MRT_DEFINE_TYPE(S, T)						\
@@ -181,7 +180,6 @@ mrt_dump_message(buffer *b, int fd)
 
   if (fd < 0)
     return;
-
 
   if (write(fd, b->start, len) < 0)
     log(L_ERR "Write to MRT file failed: %m"); /* TODO: name of file */
