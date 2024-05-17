@@ -567,13 +567,16 @@ mrt_table_dump_free(struct mrt_table_dump_state *s)
 static int
 mrt_table_dump_step(struct mrt_table_dump_state *s)
 {
-  struct bgp_write_state bws = { .as4_session = 1 };
-
-  s->max = 2048;
-  s->bws = &bws;
-
-  if (s->table_open)
+  if (s->table_open) {
+    // continue to dump next 2048 entries
+    s->max = 2048;
     goto step;
+  }
+  else {
+    struct bgp_write_state bws = { .as4_session = 1 };
+    s->max = 2048;
+    s->bws = &bws;
+  }
 
   while (mrt_next_table(s))
   {
