@@ -1,128 +1,31 @@
 import struct
 from typing import Dict, Any, Tuple, List, Union, Optional, Callable
+import ipaddress
 
 import arrow
-import ipaddress
 
 from df.mrtanalysis.util import hexline, Block
 from df.mrtanalysis.progress import TimedProgressReporter
 from df.mrtanalysis.bgp import RouteIPV4, BGPAttribute
-from df.mrtanalysis.structure import Indexer, MRTV2RibEntry, MRTV2AsPath, rib_ipv4_unicast, MRTHeader
+from df.mrtanalysis.structure import (
+    Indexer,
+    MRTV2RibEntry,
+    MRTV2AsPath,
+    rib_ipv4_unicast,
+    MRTHeader,
+)
 
-MRTHeaderTypes = {
-    0: "NULL (DEPRECATED)	[RFC6396]",
-    1: "START (DEPRECATED)	[RFC6396]",
-    2: "DIE (DEPRECATED)	[RFC6396]",
-    3: "I_AM_DEAD (DEPRECATED)	[RFC6396]",
-    4: "PEER_DOWN (DEPRECATED)	[RFC6396]",
-    5: "BGP (DEPRECATED)	[RFC6396]",
-    6: "RIP (DEPRECATED)	[RFC6396]",
-    7: "IDRP (DEPRECATED)	[RFC6396]",
-    8: "RIPNG (DEPRECATED)	[RFC6396]",
-    9: "BGP4PLUS (DEPRECATED)	[RFC6396]",
-    10: "BGP4PLUS_01 (DEPRECATED)	[RFC6396]",
-    11: "OSPFv2	[RFC6396]",
-    12: "TABLE_DUMP	[RFC6396]",
-    13: "TABLE_DUMP_V2	[RFC6396]",
-    16: "BGP4MP	[RFC6396]",
-    17: "BGP4MP_ET	[RFC6396]",
-    32: "ISIS	[RFC6396]",
-    33: "ISIS_ET	[RFC6396]",
-    48: "OSPFv3	[RFC6396]",
-    49: "OSPFv3_ET	[RFC6396]",
-}
-MRTHeaderSubType = {
-    0: "Reserved	[RFC6396]",
-    1: "PEER_INDEX_TABLE	[RFC6396]",
-    2: "RIB_IPV4_UNICAST	[RFC6396]",
-    3: "RIB_IPV4_MULTICAST	[RFC6396]",
-    4: "RIB_IPV6_UNICAST	[RFC6396]",
-    5: "RIB_IPV6_MULTICAST	[RFC6396]",
-    6: "RIB_GENERIC	[RFC6396]",
-    7: "GEO_PEER_TABLE	[RFC6397]",
-    8: "RIB_IPV4_UNICAST_ADDPATH	[RFC8050]",
-    9: "RIB_IPV4_MULTICAST_ADDPATH	[RFC8050]",
-    10: "RIB_IPV6_UNICAST_ADDPATH	[RFC8050]",
-    11: "RIB_IPV6_MULTICAST_ADDPATH	[RFC8050]",
-    12: "RIB_GENERIC_ADDPATH	[RFC8050]",
-}
+from df.mrtanalysis.structure import (
+    Analyzer,
+    MRTHeaderAnalyzer,
+    MRTV2RibTableAnalyzer,
+    MRTV2RibEntryAnalyzer,
+    MRTV2RibEntryGenericAnalyzer,
+    MRTV2PeerIndexTableAnalyzer,
+)
 
 
-def analyze(
-    pic: str, fmt: Dict[int, Dict], obj: Any, block: bytes, addr: int
-) -> Tuple[int, List[str]]:
-    """
-    create lines for analysis output
-
-    :param pic: the struct pic of the structure
-    :param fmt: the format specifier
-    :param obj:
-    :param block:
-    :param addr:
-    :return: List of Lines, number of bytes advanced
-    """
-    lines = []
-    offset = 0
-    for i, c in enumerate(pic):
-        if c == ">":
-            continue
-        nbytes = struct.calcsize(c)
-
-        hex_part = hexline(
-            block[offset:], addr + offset, size=1, width=nbytes, skipAscii=True
-        )
-
-        f: Dict[int, Union[str, Dict]] = fmt.get(i)
-        if f:
-            attr: str = f.get("attr")
-            lookup: Dict = f.get("lookup")
-            convertor: Callable[[int], str] = f.get("convert", lambda x: str(x))
-            name: str = f.get("name")
-
-            default_format_spec: str = "{value}"
-            if name:
-                default_format_spec = "{name} - {value}"
-            format_spec: str = f.get("fmt", default_format_spec)
-
-            if attr and hasattr(obj, attr):
-                value = getattr(obj, attr)
-            else:
-                if c == "P": # special pascal type string
-                    (length) = struct.unpack( ">H", block[ offset: offset + 2])
-                    value = bytes[ offset + 2: offset + 2 + length].decode()
-                else:
-                    value = struct.unpack(">" + c, block[offset : offset + nbytes])
-            if lookup:
-                lookup_value = lookup.get(value)
-            if convertor:
-                converted_value = convertor(value)
-            expl_part = format_spec.format(**locals())
-        else:
-            expl_part = "<unknown>"
-
-        line: str = f"{hex_part:<40} - {expl_part}"
-
-        lines.append(line)
-        offset += nbytes
-
-    return (offset, lines)
-
-class Analyzer(object):
-    pic: str = None
-    format: Dict[int, Union[str, Dict]] = None
-    block: bytes = None
-
-    def __init__(self, obj, fmt: Dict = None):
-        self.obj = obj
-        self.format = fmt
-        if hasattr(obj, "PIC"):
-            self.pic = obj.PIC
-
-    def analyze(self, block: bytes, addr: int) -> Tuple[int, List[str]]:
-        return analyze(self.pic, self.format, self.obj, block, addr)
-
-
-def get_analyzer_class(mrt_header:MRTHeader) -> Analyzer:
+def get_analyzer_class(mrt_header: MRTHeader) -> Analyzer:
     type: int = mrt_header.type
     subtype: int = mrt_header.subtype
 
@@ -139,144 +42,6 @@ def get_analyzer_class(mrt_header:MRTHeader) -> Analyzer:
         raise RuntimeError(f"No analyzer of subtype {subtype} of table type {type}")
 
     return subtype_analyzer
-
-
-
-class MRTAnalyzer(Analyzer):
-    def __init__(self, obj: Any, fmt: Dict):
-        Analyzer.__init__(self, obj, fmt)
-
-    def analyze(self, block: bytes, addr: int) -> Tuple[int, List[str]]:
-        return super().analyze(block, addr)
-
-class MRTHeaderAnalyzer(MRTAnalyzer):
-    """
-            0                   1                   2                   3
-            0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-           +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-           |                           Timestamp                           |
-           +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-           |             Type              |            Subtype            |
-           +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-           |                             Length                            |
-           +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-           |                      Message... (variable)
-           +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    """
-    format: Dict[int, Dict] = {
-        1: {
-            "attr": "ts",
-            "name": "TimeStamp",
-            "convert": lambda x: arrow.get(x).format("YYYY-MM-DD hh:mm:ss"),
-            "fmt": "{name} - {value} ({converted_value})",
-        },
-        2: {
-            "attr": "type",
-            "name": "Type",
-            "lookup": MRTHeaderTypes,
-            "fmt": "{value} ({lookup_value})",
-        },
-        3: {
-            "attr": "subtype",
-            "name": "SubType",
-            "lookup": MRTHeaderSubType,
-            "fmt": "{value} ({lookup_value})",
-        },
-        4: {"attr": "len", "name": "Length"},
-    }
-
-    def __init__(self, obj):
-        MRTAnalyzer.__init__(self, obj, self.format)
-
-    def analyze(self, block: bytes, addr: int) -> Tuple[int, List[str]]:
-        return super().analyze(block, addr)
-
-
-class MRTTableAnalyzer(MRTAnalyzer):
-    pass
-
-
-class MRTV2TableAnalyzer(MRTTableAnalyzer):
-    pass
-
-
-class MRTV2RibTableAnalyzer(MRTV2TableAnalyzer):
-    pass
-
-
-class MRTV2PeerIndexTableAnalyzer(MRTV2TableAnalyzer):
-    """
-
-        0                   1                   2                   3
-        0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-       |                      Collector BGP ID                         |
-       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-       |       View Name Length        |     View Name (variable)      |
-       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-       |          Peer Count           |    Peer Entries (variable)
-       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    """
-    format: Dict[int, Dict] = {
-        1: {
-            "attr": "collector_id",
-            "name": "Collector BGP ID",
-            "convert": lambda x: ipaddress.IPV4,
-            "fmt": "{name} - {value} ({converted_value})",
-        },
-        2: {
-            "attr": "type",
-            "name": "Type",
-            "lookup": MRTHeaderTypes,
-            "fmt": "{value} ({lookup_value})",
-        },
-        3: {
-            "attr": "subtype",
-            "name": "SubType",
-            "lookup": MRTHeaderSubType,
-            "fmt": "{value} ({lookup_value})",
-        },
-        4: {"attr": "len", "name": "Length"},
-    }
-
-    def __init__(self, obj):
-        MRTV2TableAnalyzer.__init__(self, obj)
-
-    def analyze(self, block: bytes, addr: int) -> Tuple[int, List[str]]:
-        return super().analyze(block, addr)
-
-
-class MRTV2RibEntryAnalyzer(MRTV2TableAnalyzer):
-    def __init__(self, obj):
-        MRTV2TableAnalyzer.__init__(self, obj)
-
-    def analyze(self, block: bytes, addr: int) -> Tuple[int, List[str]]:
-        return super().analyze(block, addr)
-
-
-class MRTV2RibEntryGenericAnalyzer(MRTV2RibEntryAnalyzer):
-    format: Dict[int, Dict] = {
-        1: {"attr": "ts", "name": "TimeStamp", "fmt": "{value}"},
-        2: {
-            "attr": "type",
-            "name": "Type",
-            "lookup": MRTHeaderTypes,
-            "fmt": "{value} ({lookup_value})",
-        },
-        3: {
-            "attr": "subtype",
-            "name": "SubType",
-            "lookup": MRTHeaderSubType,
-            "fmt": "{value} ({lookup_value})",
-        },
-        4: {"attr": "len", "name": "Length"},
-    }
-
-    def __init__(self, obj):
-        MRTAnalyzer.__init__(self, obj, self.format)
-
-    def analyze(self, block: bytes, addr: int) -> Tuple[int, List[str]]:
-        return super().analyze(block, addr)
 
 
 def stats_inc_count(stat_obj, category, key):
@@ -300,7 +65,10 @@ def get_stats_value(stat_item, category, key):
 def analyze_payload(mrt_header: MRTHeader, payload: bytes, addr: int) -> Analyzer:
     the_class = get_analyzer_class(mrt_header)
 
-    return the_class(obj, the_class.format, ).analyze(payload, addr)
+    return the_class(
+        obj,
+        the_class.format,
+    ).analyze(payload, addr)
 
 
 class Analysis(object):
@@ -452,9 +220,14 @@ class Analysis(object):
         return attributes
 
     def parse_rib_ipv4_unicast(self, block):
-        attributes_block, ip_prefix, re, rib_entry_block, rib_entry_count, sequence_number = self._parse_rib_table_start(
-            block
-        )
+        (
+            attributes_block,
+            ip_prefix,
+            re,
+            rib_entry_block,
+            rib_entry_count,
+            sequence_number,
+        ) = self._parse_rib_table_start(block)
         attrs = self.parse_bgp_attributes(attributes_block, re, rib_entry_block)
         result = rib_ipv4_unicast(
             sequence_number, ip_prefix, rib_entry_count, re, attrs
@@ -511,9 +284,14 @@ class Analysis(object):
                 continue
 
             # payload analysis
-            attributes_block, ip_prefix, re, rib_entry_block, rib_entry_count, sequence_number = self._parse_rib_table_start(
-                payload_block
-            )
+            (
+                attributes_block,
+                ip_prefix,
+                re,
+                rib_entry_block,
+                rib_entry_count,
+                sequence_number,
+            ) = self._parse_rib_table_start(payload_block)
             if not sequence_number == 0 and sequence_number != (previous_sequence + 1):
                 self.print_loc(
                     "RIB Table sequence number {0} out of sequence (last seen = {1})".format(
@@ -677,8 +455,6 @@ class Analysis(object):
             payload_block = self.indexer.payload_block(i)
             (offset, output) = analyze_payload(mrt_header, payload_block, addr)
             addr += offset
-
-
 
     def report(self, args):
         print("Statistical analyis")
