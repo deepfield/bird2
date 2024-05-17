@@ -739,6 +739,7 @@ mrt_table_dump_step(struct mrt_table_dump_state *s)
   s->bws = &bws;
 
   if (s->table_open)
+    s->bws->mp_reach = !s->ipv4;
     goto step;
 
   while (mrt_next_table(s))
