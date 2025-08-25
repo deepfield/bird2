@@ -18,7 +18,7 @@ static struct log_config *this_log;
 CF_DECLS
 
 CF_KEYWORDS(LOG, SYSLOG, ALL, DEBUG, TRACE, INFO, REMOTE, WARNING, ERROR, AUTH, FATAL, BUG, STDERR, SOFT)
-CF_KEYWORDS(NAME, CONFIRM, UNDO, CHECK, TIMEOUT, DEBUG, LATENCY, LIMIT, WATCHDOG, WARNING)
+CF_KEYWORDS(NAME, CONFIRM, UNDO, CHECK, TIMEOUT, DEBUG, LATENCY, LIMIT, WATCHDOG, WARNING, APPEND, OVERWRITE)
 
 %type <i> log_mask log_mask_list log_cat cfg_timeout
 %type <t> cfg_name
@@ -87,9 +87,22 @@ conf: mrtdump_base ;
 mrtdump_base:
    MRTDUMP PROTOCOLS mrtdump_mask ';' { new_config->proto_default_mrtdump = $3; }
  | MRTDUMP text ';' {
+     struct rfile *f = rf_open(new_config->pool, $2, "w");
+     if (!f) cf_error("Unable to open MRTDump file '%s': %m", $2);
+     new_config->mrtdump_file = rf_fileno(f);
+     new_config->append = 0;  /* Default to overwrite */
+   }
+ | MRTDUMP text APPEND ';' {
      struct rfile *f = rf_open(new_config->pool, $2, "a");
      if (!f) cf_error("Unable to open MRTDump file '%s': %m", $2);
      new_config->mrtdump_file = rf_fileno(f);
+     new_config->append = 1;
+   }
+ | MRTDUMP text OVERWRITE ';' {
+     struct rfile *f = rf_open(new_config->pool, $2, "w");
+     if (!f) cf_error("Unable to open MRTDump file '%s': %m", $2);
+     new_config->mrtdump_file = rf_fileno(f);
+     new_config->append = 0;
    }
  ;
 

@@ -27,6 +27,7 @@ struct mrt_config {
   const char *filename;
   uint period;
   int always_add_path;
+  int append;
 };
 
 struct mrt_proto {
@@ -64,6 +65,7 @@ struct mrt_table_dump_state {
   struct filter *filter;		/* Optional filter */
   const char *filename;			/* Filename pattern */
   int always_add_path;			/* Always use *_ADDPATH message subtypes */
+  int append;				/* Append to MRT file instead of overwriting */
 
   /* Allocated by mrt_table_dump_init() */
   pool *pool;				/* Pool for table dump */

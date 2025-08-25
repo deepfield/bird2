@@ -17,7 +17,7 @@ CF_DEFINES
 
 CF_DECLS
 
-CF_KEYWORDS(MRT, TABLE, FILTER, FILENAME, PERIOD, ALWAYS, ADD, PATH, DUMP, TO)
+CF_KEYWORDS(MRT, TABLE, FILTER, FILENAME, PERIOD, ALWAYS, ADD, PATH, DUMP, TO, APPEND, OVERWRITE)
 
 %type <md> mrt_dump_args
 
@@ -39,6 +39,7 @@ mrt_proto_item:
  | FILENAME text	{ MRT_CFG->filename = $2; }
  | PERIOD expr		{ MRT_CFG->period = $2; }
  | ALWAYS ADD PATH bool	{ MRT_CFG->always_add_path = $4; }
+ | APPEND bool		{ MRT_CFG->append = $2; }
  ;
 
 mrt_proto_opts:

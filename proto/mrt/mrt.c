@@ -261,7 +261,13 @@ mrt_open_file(struct mrt_table_dump_state *s)
   btime now_real = current_real_time();
 
   strcpy( name, s->filename );
-  s->file = rf_open(s->pool, name, "a");
+  if (s->append)
+  {
+    s->file = rf_open(s->pool, name, "a");
+  } else
+  {
+    s->file = rf_open(s->pool, name, "w");
+  }
   if (!s->file)
   {
     mrt_log(s, "Unable to open MRT file '%s': %m", name);
@@ -803,6 +809,7 @@ mrt_timer(timer *t)
   s->filter = cf->filter;
   s->filename = cf->filename;
   s->always_add_path = cf->always_add_path;
+  s->append = cf->append;
 
   if (s->table_ptr)
     rt_lock_table(s->table_ptr);
@@ -876,6 +883,7 @@ mrt_dump_cmd(struct mrt_dump_data *d)
   s->table_ptr = d->table_ptr;
   s->filter = d->filter;
   s->filename = d->filename;
+  s->append = s->config->append;  /* Use global config's append setting for CLI dumps */
 
   if (s->table_ptr)
     rt_lock_table(s->table_ptr);

@@ -566,9 +566,9 @@ sysdep_shutdown_done(void)
  *	Signals
  */
 
-volatile int async_config_flag;
-volatile int async_dump_flag;
-volatile int async_shutdown_flag;
+extern volatile int async_config_flag;
+extern volatile int async_dump_flag;
+extern volatile int async_shutdown_flag;
 
 static void
 handle_sighup(int sig UNUSED)

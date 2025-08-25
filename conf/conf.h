@@ -55,6 +55,7 @@ struct config {
   int obstacle_count;			/* Number of items blocking freeing of this config */
   int shutdown;				/* This is a pseudo-config for daemon shutdown */
   btime load_time;			/* When we've got this configuration */
+  int append;     /* append to mrt file*/
 };
 
 /* Please don't use these variables in protocols. Use proto_config->global instead. */
