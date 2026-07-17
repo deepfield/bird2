@@ -1139,12 +1139,6 @@ bgp_decode_next_hop_vpn(struct bgp_parse_state *s, byte *data, uint len, rta *a)
 
 
 
-static uint
-bgp_encode_next_hop_none(struct bgp_write_state *s UNUSED, eattr *a UNUSED, byte *buf UNUSED, uint size UNUSED)
-{
-  return 0;
-}
-
 static void
 bgp_decode_next_hop_none(struct bgp_parse_state *s UNUSED, byte *data UNUSED, uint len UNUSED, rta *a UNUSED)
 {
@@ -1157,10 +1151,43 @@ bgp_decode_next_hop_none(struct bgp_parse_state *s UNUSED, byte *data UNUSED, ui
   return;
 }
 
-static void
-bgp_update_next_hop_none(struct bgp_export_state *s, eattr *a, ea_list **to)
+static uint
+bgp_encode_next_hop_flow(struct bgp_write_state *s, eattr *a, byte *buf, uint size UNUSED)
 {
-  /* NEXT_HOP shall not pass */
+  /*
+   * FlowSpec normally carries no next hop (RFC 8955). For the
+   * draft-ietf-idr-flowspec-redirect-ip-00 "redirect to IP" action the redirect
+   * target rides in the MP_REACH_NLRI next hop. When the route carries an
+   * explicit BA_NEXT_HOP (kept by bgp_update_next_hop_flow) we emit it here;
+   * otherwise ordinary FlowSpec routes keep their 0-length next hop.
+   */
+  if (!a)
+    return 0;
+
+  ip_addr *nh = (void *) a->u.ptr->data;
+
+  if (bgp_channel_is_ipv4(s->channel) && ipa_is_ip4(nh[0]))
+  {
+    put_ip4(buf, ipa_to_ip4(nh[0]));
+    return 4;
+  }
+
+  put_ip6(buf, ipa_to_ip6(nh[0]));
+  return 16;
+}
+
+static void
+bgp_update_next_hop_flow(struct bgp_export_state *s, eattr *a, ea_list **to)
+{
+  /*
+   * Keep an explicitly-set next hop so the draft-ietf-idr-flowspec-redirect-ip-00
+   * "redirect to IP" action can carry the redirect target in MP_REACH_NLRI.
+   * Ordinary FlowSpec routes have no next hop (RFC 8955), so strip it as
+   * bgp_update_next_hop_none does when none was set by the export filter.
+   */
+  if (a && a->u.ptr && a->u.ptr->length && ipa_nonzero(*(ip_addr *) a->u.ptr->data))
+    return;
+
   if (a)
     bgp_unset_attr(to, s->pool, BA_NEXT_HOP);
 }
@@ -1933,9 +1960,9 @@ static const struct bgp_af_desc bgp_af_table[] = {
     .name = "flow4",
     .encode_nlri = bgp_encode_nlri_flow4,
     .decode_nlri = bgp_decode_nlri_flow4,
-    .encode_next_hop = bgp_encode_next_hop_none,
+    .encode_next_hop = bgp_encode_next_hop_flow,
     .decode_next_hop = bgp_decode_next_hop_none,
-    .update_next_hop = bgp_update_next_hop_none,
+    .update_next_hop = bgp_update_next_hop_flow,
   },
   {
     .afi = BGP_AF_FLOW6,
@@ -1944,9 +1971,9 @@ static const struct bgp_af_desc bgp_af_table[] = {
     .name = "flow6",
     .encode_nlri = bgp_encode_nlri_flow6,
     .decode_nlri = bgp_decode_nlri_flow6,
-    .encode_next_hop = bgp_encode_next_hop_none,
+    .encode_next_hop = bgp_encode_next_hop_flow,
     .decode_next_hop = bgp_decode_next_hop_none,
-    .update_next_hop = bgp_update_next_hop_none,
+    .update_next_hop = bgp_update_next_hop_flow,
   },
 };
 
