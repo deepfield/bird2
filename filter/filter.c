@@ -59,7 +59,8 @@ static inline int
 undef_value(struct f_val v)
 {
   return ((v.type == T_PATH) || (v.type == T_CLIST) ||
-	  (v.type == T_ECLIST) || (v.type == T_LCLIST)) &&
+	  (v.type == T_ECLIST) || (v.type == T_LCLIST) ||
+	  (v.type == T_IP6ECLIST)) &&
     (v.val.ad == &undef_adata);
 }
 
@@ -108,6 +109,16 @@ pm_format(struct f_path_mask *p, buffer *buf)
 
 static inline int val_is_ip4(const struct f_val v)
 { return (v.type == T_IP) && ipa_is_ip4(v.val.ip); }
+
+static inline int
+ip6ec_cmp(ip6ec v1, ip6ec v2)
+{
+  int i;
+  for (i = 0; i < 5; i++)
+    if (v1.v[i] != v2.v[i])
+      return (v1.v[i] > v2.v[i]) ? 1 : -1;
+  return 0;
+}
 
 static inline int
 lcomm_cmp(lcomm v1, lcomm v2)
@@ -163,6 +174,8 @@ val_compare(struct f_val v1, struct f_val v2)
     return u64_cmp(v1.val.ec, v2.val.ec);
   case T_LC:
     return lcomm_cmp(v1.val.lc, v2.val.lc);
+  case T_IP6EC:
+    return ip6ec_cmp(v1.val.i6e, v2.val.i6e);
   case T_IP:
     return ipa_compare(v1.val.ip, v2.val.ip);
   case T_NET:
@@ -227,6 +240,7 @@ val_same(struct f_val v1, struct f_val v2)
   case T_CLIST:
   case T_ECLIST:
   case T_LCLIST:
+  case T_IP6ECLIST:
     return adata_same(v1.val.ad, v2.val.ad);
   case T_SET:
     return same_tree(v1.val.t, v2.val.t);
@@ -270,6 +284,10 @@ eclist_set_type(struct f_tree *set)
 static inline int
 lclist_set_type(struct f_tree *set)
 { return set->from.type == T_LC; }
+
+static inline int
+ip6eclist_set_type(struct f_tree *set)
+{ return set->from.type == T_IP6EC; }
 
 static int
 clist_match_set(struct adata *clist, struct f_tree *set)
@@ -333,6 +351,30 @@ lclist_match_set(struct adata *list, struct f_tree *set)
   v.type = T_LC;
   for (i = 0; i < len; i += 3) {
     v.val.lc = lc_get(l, i);
+    if (find_tree(set, v))
+      return 1;
+  }
+
+  return 0;
+}
+
+static int
+ip6eclist_match_set(struct adata *list, struct f_tree *set)
+{
+  if (!list)
+    return 0;
+
+  if (!ip6eclist_set_type(set))
+    return CMP_ERROR;
+
+  struct f_val v;
+  u32 *l = int_set_get_data(list);
+  int len = int_set_get_size(list);
+  int i;
+
+  v.type = T_IP6EC;
+  for (i = 0; i < len; i += 5) {
+    v.val.i6e = ip6ec_get(l, i);
     if (find_tree(set, v))
       return 1;
   }
@@ -441,6 +483,38 @@ lclist_filter(struct linpool *pool, struct adata *list, struct f_val set, int po
   return res;
 }
 
+static struct adata *
+ip6eclist_filter(struct linpool *pool, struct adata *list, struct f_val set, int pos)
+{
+  if (!list)
+    return NULL;
+
+  int tree = (set.type == T_SET);	/* 1 -> set is T_SET, 0 -> set is T_IP6ECLIST */
+  struct f_val v;
+
+  int len = int_set_get_size(list);
+  u32 *l = int_set_get_data(list);
+  u32 tmp[len];
+  u32 *k = tmp;
+  int i;
+
+  v.type = T_IP6EC;
+  for (i = 0; i < len; i += 5) {
+    v.val.i6e = ip6ec_get(l, i);
+    /* pos && member(val, set) || !pos && !member(val, set),  member() depends on tree */
+    if ((tree ? !!find_tree(set.val.t, v) : ip6ec_set_contains(set.val.ad, v.val.i6e)) == pos)
+      k = ip6ec_copy(k, l+i);
+  }
+
+  uint nl = (k - tmp) * sizeof(u32);
+  if (nl == list->length)
+    return list;
+
+  struct adata *res = adata_empty(pool, nl);
+  memcpy(res->data, tmp, nl);
+  return res;
+}
+
 /**
  * val_in_range - implement |~| operator
  * @v1: element
@@ -468,6 +542,9 @@ val_in_range(struct f_val v1, struct f_val v2)
 
   if ((v1.type == T_LC) && (v2.type == T_LCLIST))
     return lc_set_contains(v2.val.ad, v1.val.lc);
+
+  if ((v1.type == T_IP6EC) && (v2.type == T_IP6ECLIST))
+    return ip6ec_set_contains(v2.val.ad, v1.val.i6e);
 
   if ((v1.type == T_STRING) && (v2.type == T_STRING))
     return patmatch(v2.val.s, v1.val.s);
@@ -498,6 +575,9 @@ val_in_range(struct f_val v1, struct f_val v2)
   if (v1.type == T_LCLIST)
     return lclist_match_set(v1.val.ad, v2.val.t);
 
+  if (v1.type == T_IP6ECLIST)
+    return ip6eclist_match_set(v1.val.ad, v2.val.t);
+
   if (v1.type == T_PATH)
     return as_path_match_set(v1.val.ad, v2.val.t);
 
@@ -523,6 +603,7 @@ val_format(struct f_val v, buffer *buf)
   case T_QUAD:	buffer_print(buf, "%R", v.val.i); return;
   case T_EC:	ec_format(buf2, v.val.ec); buffer_print(buf, "%s", buf2); return;
   case T_LC:	lc_format(buf2, v.val.lc); buffer_print(buf, "%s", buf2); return;
+  case T_IP6EC:	ip6ec_format(buf2, v.val.i6e); buffer_print(buf, "%s", buf2); return;
   case T_RD:	rd_format(v.val.ec, buf2, 1024); buffer_print(buf, "%s", buf2); return;
   case T_PREFIX_SET: trie_format(v.val.ti, buf); return;
   case T_SET:	tree_format(v.val.t, buf); return;
@@ -531,6 +612,7 @@ val_format(struct f_val v, buffer *buf)
   case T_CLIST:	int_set_format(v.val.ad, 1, -1, buf2, 1000); buffer_print(buf, "(clist %s)", buf2); return;
   case T_ECLIST: ec_set_format(v.val.ad, -1, buf2, 1000); buffer_print(buf, "(eclist %s)", buf2); return;
   case T_LCLIST: lc_set_format(v.val.ad, -1, buf2, 1000); buffer_print(buf, "(lclist %s)", buf2); return;
+  case T_IP6ECLIST: ip6ec_set_format(v.val.ad, -1, buf2, 1000); buffer_print(buf, "(ip6eclist %s)", buf2); return;
   case T_PATH_MASK: pm_format(v.val.path_mask, buf); return;
   default:	buffer_print(buf, "[unknown type %x]", v.type); return;
   }
@@ -752,6 +834,31 @@ interpret(struct f_inst *what)
 
       res.type = T_LC;
       res.val.lc = (lcomm) { v1.val.i, v2.val.i, v3.val.i };
+
+      break;
+    }
+
+  case FI_IP6EC_CONSTRUCT:
+    {
+      ARG(1, T_INT);
+      ARG(2, T_IP);
+      ARG(3, T_INT);
+
+      if (ipa_is_ip4(v2.val.ip))
+	runtime("IPv6 address expected in ip6ec constructor");
+      if (v1.val.i > 0xFF)
+	runtime("ip6ec subtype out of range");
+      if (v3.val.i > 0xFFFF)
+	runtime("ip6ec local administrator out of range");
+
+      byte b[IP6_ECOMM_LENGTH];
+      put_u8(b, 0x00);			/* transitive IPv6 address specific EC */
+      put_u8(b + 1, v1.val.i);		/* subtype */
+      put_ip6(b + 2, ipa_to_ip6(v2.val.ip));
+      put_u16(b + 18, v3.val.i);	/* local admin (LSB = RFC 8955 'C'/copy bit) */
+
+      res.type = T_IP6EC;
+      get_u32s(b, res.val.i6e.v, 5);
 
       break;
     }
@@ -1058,6 +1165,13 @@ interpret(struct f_inst *what)
 	  break;
 	}
 
+	/* The same special case for ip6_ec_set */
+	if ((what->aux & EAF_TYPE_MASK) == EAF_TYPE_IP6_EC_SET) {
+	  res.type = T_IP6ECLIST;
+	  res.val.ad = &undef_adata;
+	  break;
+	}
+
 	/* Undefined value */
 	res.type = T_VOID;
 	break;
@@ -1099,6 +1213,10 @@ interpret(struct f_inst *what)
 	break;
       case EAF_TYPE_LC_SET:
 	res.type = T_LCLIST;
+	res.val.ad = e->u.ptr;
+	break;
+      case EAF_TYPE_IP6_EC_SET:
+	res.type = T_IP6ECLIST;
 	res.val.ad = e->u.ptr;
 	break;
       case EAF_TYPE_UNDEF:
@@ -1190,6 +1308,11 @@ interpret(struct f_inst *what)
 	  runtime( "Setting lclist attribute to non-lclist value" );
 	l->attrs[0].u.ptr = v1.val.ad;
 	break;
+      case EAF_TYPE_IP6_EC_SET:
+	if (v1.type != T_IP6ECLIST)
+	  runtime( "Setting ip6eclist attribute to non-ip6eclist value" );
+	l->attrs[0].u.ptr = v1.val.ad;
+	break;
       case EAF_TYPE_UNDEF:
 	if (v1.type != T_VOID)
 	  runtime( "Setting void attribute to non-void value" );
@@ -1225,6 +1348,7 @@ interpret(struct f_inst *what)
     case T_CLIST:  res.val.i = int_set_get_size(v1.val.ad); break;
     case T_ECLIST: res.val.i = ec_set_get_size(v1.val.ad); break;
     case T_LCLIST: res.val.i = lc_set_get_size(v1.val.ad); break;
+    case T_IP6ECLIST: res.val.i = ip6ec_set_get_size(v1.val.ad); break;
     default: runtime( "Prefix, path, clist or eclist expected" );
     }
     break;
@@ -1514,6 +1638,48 @@ interpret(struct f_inst *what)
 	bug("unknown Ca operation");
       }
     }
+    else if (v1.type == T_IP6ECLIST)
+    {
+      /* IPv6 address specific extended community list (RFC 5701) */
+      int arg_set = 0;
+
+      /* v2.val is either IP6EC or IP6EC-set */
+      if ((v2.type == T_SET) && ip6eclist_set_type(v2.val.t))
+	arg_set = 1;
+      else if (v2.type == T_IP6ECLIST)
+	arg_set = 2;
+      else if (v2.type != T_IP6EC)
+	runtime("Can't add/delete non-ip6ec");
+
+      res.type = T_IP6ECLIST;
+      switch (what->aux)
+      {
+      case 'a':
+	if (arg_set == 1)
+	  runtime("Can't add set");
+	else if (!arg_set)
+	  res.val.ad = ip6ec_set_add(f_pool, v1.val.ad, v2.val.i6e);
+	else
+	  res.val.ad = ip6ec_set_union(f_pool, v1.val.ad, v2.val.ad);
+	break;
+
+      case 'd':
+	if (!arg_set)
+	  res.val.ad = ip6ec_set_del(f_pool, v1.val.ad, v2.val.i6e);
+	else
+	  res.val.ad = ip6eclist_filter(f_pool, v1.val.ad, v2, 0);
+	break;
+
+      case 'f':
+	if (!arg_set)
+	  runtime("Can't filter ip6ec");
+	res.val.ad = ip6eclist_filter(f_pool, v1.val.ad, v2, 1);
+	break;
+
+      default:
+	bug("unknown Ca operation");
+      }
+    }
     else
       runtime("Can't add/delete to non-[e|l]clist");
 
@@ -1634,6 +1800,7 @@ i_same(struct f_inst *f1, struct f_inst *f2)
   case FI_TYPE: ONEARG; break;
 
   case FI_LC_CONSTRUCT:
+  case FI_IP6EC_CONSTRUCT:
     THREEARGS;
     break;
 

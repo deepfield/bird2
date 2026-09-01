@@ -866,6 +866,18 @@ ea_show_lc_set(struct cli *c, struct adata *ad, byte *pos, byte *buf, byte *end)
     }
 }
 
+static inline void
+ea_show_ip6ec_set(struct cli *c, struct adata *ad, byte *pos, byte *buf, byte *end)
+{
+  int i = ip6ec_set_format(ad, 0, pos, end - pos);
+  cli_printf(c, -1012, "\t%s", buf);
+  while (i)
+    {
+      i = ip6ec_set_format(ad, i, buf, end - buf - 1);
+      cli_printf(c, -1012, "\t\t%s", buf);
+    }
+}
+
 /**
  * ea_show - print an &eattr to CLI
  * @c: destination CLI
@@ -943,6 +955,9 @@ ea_show(struct cli *c, eattr *e)
 	  return;
 	case EAF_TYPE_LC_SET:
 	  ea_show_lc_set(c, ad, pos, buf, end);
+	  return;
+	case EAF_TYPE_IP6_EC_SET:
+	  ea_show_ip6ec_set(c, ad, pos, buf, end);
 	  return;
 	case EAF_TYPE_UNDEF:
 	default:
