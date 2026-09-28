@@ -5,11 +5,12 @@ analytics. Every BGP path attribute in a dump must be byte-correct, value *and* 
 and so must the fork-specific parts: VPN `RIB_GENERIC` records, the MP_REACH next hop, and
 how dumps are written to disk.
 
-## Status: phases 0–2 done (2026-09-28)
+## Status: phases 0–3 done (2026-09-28)
 
 Branch `2.0.4-mrt-dump-tests` (off `2.0.4`). BIRD builds on the dev box
 (`install_prereq.sh`, `build_bird.sh`), the harness runs, and the production-path test
-passes: 72 tests in about 7 s, namespaces cleaned up after each run. Next: phase 3.
+passes, and so does tier 1: 119 tests and 2 strict xfails (findings 4 and 13) in about
+8 s, namespaces cleaned up after each run. Next: phase 4.
 
 Breakage checks (2026-09-28, BIRD rebuilt in a throwaway worktree, peers on the normal
 build): forcing the RIB entry's peer index to 0 (`mrt.c:555`) fails the 8 peer-index
@@ -61,7 +62,7 @@ tools/df/test/mrt/
   test_bgpdump.py          wrapper tests: line parsing, and problems the real bgpdump only logs
   test_harness.py          smoke: dumps from a daemon in a namespace, a BGP session over veth
   test_production_path.py  pipedream's rendered config, merged + analytics sessions, periodic dumps
-  test_attributes.py       tier 1: filter-set attributes, no peer
+  test_attributes.py       tier 1: filter-set attributes, byte-exact, no peer
   test_attributes_bgp.py   tier 2: attributes received over BGP
   test_record_types.py     VPN RIB_GENERIC, prefix encodings
   test_dump_mechanics.py   >2048 routes, append mode, table selection, stale next hop
@@ -142,7 +143,8 @@ re-verified once this harness runs**, then pinned by a test.
    not as attribute 3. `bgp_encode_next_hop` (`proto/bgp/attrs.c:291`) drops it ("FIXME:
    skip IPv6 next hops for IPv4 routes during MRT dump"). Production enables
    `extended next hop on` for ipv4, so these routes reach analytics without a next hop.
-   **Test: `xfail(strict=True)`.**
+   **Test: `xfail(strict=True)`** (`test_attributes.py`); *verified 2026-09-28, it fails
+   because the entry has no next hop at all.*
 5. **Attribute flags differ by provenance**, and the dump shows it:
    - filter-set attributes → all flags `0x00` (the eattr has none to write back);
    - received transitive attributes → flags preserved (`0x40`, `0x80`, `0xc0`);
@@ -180,6 +182,11 @@ re-verified once this harness runs**, then pinned by a test.
     `bws->mp_next_hop` (`attrs.c:306`) and nothing resets it between routes; one `bws`
     serves a whole dump step (`mrt.c:736`). An IPv6 entry that has attributes but no
     NEXT_HOP would get the previous route's next hop. **Test: `xfail(strict=True)`.**
+    *Confirmed 2026-09-28* (`test_attributes.py`): `2001:db8:7700::/40`, a static route
+    with only a MED, was dumped with MP_REACH next hop `2001:db8::51`, the next hop of the
+    route dumped before it. BGP-learned routes always carry a next hop, so this needs an
+    IPv6/VPN route with BGP attributes and none: e.g. a unicast mitigation static in a
+    `mit_dump_*` table, if those set attributes without a next hop (not checked).
 14. **VPN + ADD-PATH writes an unparseable record.** The subtype is always `RIB_GENERIC`,
     never `RIB_GENERIC_ADDPATH` (`mrt.c:640-643`), but the 4-byte path ID is still written
     when `add_path` is set (`mrt.c:564-565`). **Test: `xfail(strict=True)`.**
@@ -247,29 +254,45 @@ The dev box's `/usr/local/etc/bird/bird.conf` is rendered by pipedream's
     link-local on both ends, and `test_production_path.py` asserts the DUT received two
     next hop addresses. Lab-only: production interfaces are long up.
 
-## Coverage (planned)
+22. **IPv6 entries do not list attributes in type-code order.** `mrt.c` appends the
+    MP_REACH_NLRI next hop after everything `bgp_encode_attrs` wrote, so an entry with
+    communities reads `1, 2, 4, 8, 32, 14`. RFC 4271 asks UPDATEs to be ordered (SHOULD);
+    RFC 6396 says nothing, and bgpdump does not mind. Pinned in `test_attributes.py`.
+
+Tier 1 (`test_attributes.py`) also verified findings 2, 3, 5 and 18 byte for byte: IPv6
+next hops in the truncated MP_REACH_NLRI, IPv4 ones in NEXT_HOP, every filter-set flag
+byte `0x00` (the MP_REACH one included) apart from the extended-length bit.
+
+## Coverage
 
 | attribute | code | tier 1 | tier 2 | notes |
 |---|---|---|---|---|
-| ORIGIN | 1 | all three values | ✓ | |
-| AS_PATH | 2 | order, 32-bit ASN, single AS_SEQUENCE, exact length | ✓ | 4-byte ASNs always |
-| NEXT_HOP | 3 | v4 legacy; v6-on-v4 dropped (4) | value + flag loss (5) | |
-| MED | 4 | full 32-bit range | ✓ | |
-| LOCAL_PREF | 5 | ✓ | iBGP kept / eBGP defaulted | |
-| COMMUNITY | 8 | + extended-length flag at 70 communities | ✓ | |
-| ORIGINATOR_ID / CLUSTER_LIST | 9 / 10 | ✓ | — | |
-| MP_REACH_NLRI | 14 | truncated form (2), stale next hop (13) | 16- and 32-byte next hops | 32-byte received, global kept: `test_production_path.py` |
-| EXT_COMMUNITY | 16 | rt + ro | ✓ | |
-| IPV6_EXT_COMMUNITY | 25 | v4 and v6 routes, byte-exact | ✓ BIRD announcer | DEFBE-9172; redirect subtype `0x0c` |
-| LARGE_COMMUNITY | 32 | incl. 32-bit fields | ✓ | |
-| prefix encoding | — | default route, /32, /128 | ✓ | |
+Tier 1 is done (✅, byte-exact incl. flags, plus the `bgpdump -m` field where bgpdump
+prints one); the tier 2 column is still planned.
+
+| attribute | code | tier 1 | tier 2 | notes |
+|---|---|---|---|---|
+| ORIGIN | 1 | ✅ all three values | ✓ | |
+| AS_PATH | 2 | ✅ order, 32-bit ASN; 300 ASNs → 45 + 255 segments, extended length | ✓ | 4-byte ASNs always |
+| NEXT_HOP | 3 | ✅ v4 legacy; v6-on-v4 dropped (4, xfail) | value + flag loss (5) | |
+| MED | 4 | ✅ 0, 1, 2³²−1 | ✓ | |
+| LOCAL_PREF | 5 | ✅ | iBGP kept / eBGP defaulted | eBGP default 100: `test_production_path.py` |
+| COMMUNITY | 8 | ✅ insertion order kept; 63 → plain, 64 → extended length | ✓ | |
+| ORIGINATOR_ID / CLUSTER_LIST | 9 / 10 | ✅ | — | |
+| MP_REACH_NLRI | 14 | ✅ truncated form (2), flags (18), IPv4-mapped; stale next hop (13, xfail) | 16- and 32-byte next hops | 32-byte received, global kept: `test_production_path.py` |
+| EXT_COMMUNITY | 16 | ✅ rt 2-octet AS, ro IPv4, rt 4-octet AS | ✓ | |
+| IPV6_EXT_COMMUNITY | 25 | — | — | DEFBE-9172 is not merged into `2.0.4`: this build cannot produce it |
+| LARGE_COMMUNITY | 32 | ✅ incl. 32-bit fields | ✓ | |
+| prefix encoding | — | ✅ /0, /32, /128, /1, /9, /10, /17, /25, /33, no attributes | ✓ | |
 | VPN RIB_GENERIC | — | static vpn4/vpn6 routes | vpn4/vpn6 mpls sessions | (11), (14) |
 
 ### Known gaps
 
-- **ATOMIC_AGGREGATE (6) and AGGREGATOR (7)**: no way to set either. `bgp_aggregator` is
-  declared `EAF_TYPE_INT` in 2.0.4 (`proto/bgp/config.Y:288`), which cannot hold the
-  8-byte value, and a BIRD announcer has the same limitation. Uncovered.
+- **ATOMIC_AGGREGATE (6) and AGGREGATOR (7)**: no way to set either. `bgp_atomic_aggr`
+  is opaque ("Setting opaque attribute is not allowed"); `bgp_aggregator` is declared
+  `EAF_TYPE_INT` in 2.0.4 (`proto/bgp/config.Y:287`), which cannot hold the 8-byte value,
+  and a BIRD announcer has the same limitation. Uncovered.
+- **IPV6_EXT_COMMUNITY (25)**: needs DEFBE-9172 merged into `2.0.4`.
 - **AS4_PATH (17)**: an announcer with `enable as4 off` sends one, but the DUT merges it
   into AS_PATH on receipt, so a dump should never contain it. Assert that, nothing more.
 - **AS_SET segments**: no way to build one in 2.0.4 filters. Uncovered.
@@ -288,7 +311,7 @@ Agreed 2026-09-28.
    pipe copies it into a `merged` table, and that table is dumped. Asserts peer index,
    prefix, next hop, AS path and communities, in the reader and in `bgpdump -m`.
    Finding 17. If the suite had one test, it would be this one.
-3. **Tier 1 attributes.** Findings 2–5, 18.
+3. **Tier 1 attributes.** *Done.* Findings 2–5, 18.
 4. **VPN RIB_GENERIC.** Findings 11, 12, 14.
 5. **Tier 2 attributes over BGP**, flags and the BGP4MP cross-check.
 6. **Dump mechanics and edge cases.** Findings 13, 15, 16.
