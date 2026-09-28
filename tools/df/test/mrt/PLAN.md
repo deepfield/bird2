@@ -5,18 +5,20 @@ analytics. Every BGP path attribute in a dump must be byte-correct, value *and* 
 and so must the fork-specific parts: VPN `RIB_GENERIC` records, the MP_REACH next hop, and
 how dumps are written to disk.
 
-## Status: phases 0–5 done (2026-09-28)
+## Status: phases 0–6 done (2026-09-28)
 
 Branch `2.0.4-mrt-dump-tests` (off `2.0.4`). BIRD builds on the dev box
 (`install_prereq.sh`, `build_bird.sh`), the harness runs, and the production-path test
-passes, and so do tier 1, the VPN records and tier 2: 201 tests and 6 strict xfails
-(findings 4 ×3, 12, 13, 14) in about 14 s, namespaces cleaned up after each run. Next:
-phase 6.
+passes, and so do tier 1, the VPN records, tier 2 and the dump mechanics: 216 tests and
+8 strict xfails (findings 4 ×3, 12, 13, 14, 16, 26) in about 20 s, namespaces cleaned up
+after each run. All planned phases are done; phases A, C, D remain as later work.
 
 Breakage checks (2026-09-28, BIRD rebuilt in a throwaway worktree, peers on the normal
 build): forcing the RIB entry's peer index to 0 (`mrt.c:555`) fails the 8 peer-index
 checks in `test_production_path.py`, reader and bgpdump alike; always taking the second
-address of a 32-byte next hop (`mrt.c:603`) fails the 4 IPv6 next hop checks.
+address of a 32-byte next hop (`mrt.c:603`) fails the 4 IPv6 next hop checks; dropping
+the DP-6093 resume fix (`mrt.c:742`) fails the IPv6 and VPN large-table checks in
+`test_dump_mechanics.py` at record 1025, the first after the first dump step.
 
 An earlier container-based version of this suite (`compile-stack/`, 31 tests) is not
 available. Its design and findings are carried over below; its code is not.
@@ -67,7 +69,7 @@ tools/df/test/mrt/
   test_attributes_bgp.py   tier 2: attributes received over BGP, checked against the UPDATE
   prodconf.py              DUT configs as pipedream's renderer writes them (phases 2, 4)
   test_record_types.py     VPN RIB_GENERIC: static routes byte-exact, received over BGP
-  test_dump_mechanics.py   >2048 routes, append mode, table selection, stale next hop
+  test_dump_mechanics.py   multi-step dumps (5000 routes), append, literal filenames, patterns
 ```
 
 ## Harness
@@ -226,11 +228,24 @@ re-verified once this harness runs**, then pinned by a test.
     `255.255.255.255`). Production enables neither `always add path` nor ADD-PATH.
 15. **Dumps of more than 2048 routes pause and resume** (`s->max`, `mrt.c:738`). The fork
     patched the resume path to re-set `mp_reach` (`mrt.c:741-744`); nothing guards it.
-    Needs a table of more than 2048 IPv6 routes.
+    Needs a table of more than 2048 IPv6 routes. *Verified 2026-09-28*
+    (`test_dump_mechanics.py`): a step holds about 1024 routes (each costs 1 + entries);
+    5000 IPv4/IPv6 and 2500 VPNv4 routes, each with its own MED and next hop, come out
+    complete, in sequence, every entry with its own attributes, through `mrt dump` and the
+    periodic protocol alike. The fix is DP-6093 (`3c9f9151`, `8c206264`, May 2024): without
+    it, every IPv6 entry after the first step reaches analytics with next hop
+    `255.255.255.255`, and VPN entries get a bare IPv4 NEXT_HOP (breakage check above).
 16. **The filename is literal and opened for append** (`mrt.c:263-264`); upstream's
     `%N`/strftime expansion was removed. Repeated dumps, and multi-table patterns, append
     to one file, each section with its own PEER_INDEX_TABLE and a sequence number
-    restarting at 0. The `strcpy` into a `PATH_MAX` buffer is unbounded.
+    restarting at 0. The `strcpy` into a `PATH_MAX` buffer is unbounded. *Verified
+    2026-09-28* (`test_dump_mechanics.py`): repeated dumps append whole sections, each
+    starting at sequence 0; `%N`/`%Y` in a filename stay literal; a pattern dump writes
+    one section per table in `routing_tables` order and the sequence number runs on across
+    them (one counter per dump). A `protocol mrt` filename of 4096+ characters kills
+    BIRD at its first dump (glibc: "buffer overflow detected", SIGABRT); the CLI cannot
+    reach it, as BIRD closes a connection that sends so long a line. That case is a strict
+    xfail, not a pin: a crash is not behaviour to keep. Production filenames are short.
 17. **Production dumps pipe-fed tables.** On a merged session the BGP channel imports
     into `merged_session_*`, and the `analytics_mrt_session_*` pipe copies the RTS_BGP
     routes on into `bgp_session_*`, the dumped table. The peer index is looked up from
@@ -312,6 +327,22 @@ The dev box's `/usr/local/etc/bird/bird.conf` is rendered by pipedream's
     Active) carry peer and local IP `0.0.0.0` / `::`, as there is no socket to take them
     from (`packets.c:104`). Pinned in `test_attributes_bgp.py`.
 
+26. **bgpdump garbles large VPN dumps from peer `::`.** With ~3000 RIB_GENERIC records
+    whose peer is the IPv6 unspecified address (BIRD's peer 0 for non-BGP routes, finding
+    19), bgpdump 1.4.99.14 loses or garbles routes from about record 2996 on: 30 runs out
+    of 30 went wrong, differently each time (2996, 2997 or 3007 rows for 3000, sometimes
+    lines of raw memory, never a warning, exit 0), which points at memory corruption in
+    bgpdump. The same records from a real IPv6 peer, IPv6 unicast records from `::`, and
+    3000 IPv4 records are fine. Production VPN dumps would come from BGP sessions with real
+    peers, but the bug is bgpdump's to fix. Strict xfail in `test_bgpdump.py`, with both
+    controls; the phase 6 VPN table stays at 2500 routes to keep clear of it.
+
+Also verified in phase 6: an empty table dumps as one PEER_INDEX_TABLE and no records
+(bgpdump prints nothing, no warning); `mrt dump ... where ...` dumps only the matching
+routes, sequence from 0; an unopenable dump file is reported on the CLI as an `8009-`
+line inside a reply that ends in success (`BirdCtl` now treats any error line as a
+failure), no file is written, and BIRD carries on.
+
 Tier 2 (`test_attributes_bgp.py`) verified finding 5 for received attributes: flags come
 through as sent (ORIGIN, AS_PATH `0x40`; MED `0x80`; COMMUNITY `0xc0`, `0xd0` with the
 extended length; EXT/LARGE_COMMUNITY `0xc0`; ORIGINATOR_ID, CLUSTER_LIST `0x80`; iBGP
@@ -370,7 +401,7 @@ Agreed 2026-09-28.
 3. **Tier 1 attributes.** *Done.* Findings 2–5, 18.
 4. **VPN RIB_GENERIC.** *Done.* Findings 11, 12, 14.
 5. **Tier 2 attributes over BGP**, flags and the BGP4MP cross-check. *Done.*
-6. **Dump mechanics and edge cases.** Findings 13, 15, 16.
+6. **Dump mechanics and edge cases.** *Done.* Findings 15, 16 (13 is covered in tier 1).
 7. **Later phases** (unchanged in intent):
    - **A. Table topology / isolation.** Route injected by peer A lands in A's table and
      only A's; each protocol (`ipv4`/`ipv6`/`vpn4`/`vpn6`/`ipv4-mpls`/`ipv6-mpls`) dumps to
@@ -388,6 +419,9 @@ Agreed 2026-09-28.
 
 - Jira ticket? (branch is `2.0.4-mrt-dump-tests` until there is one)
 - Fixing findings 4, 12, 13, 14: in this branch, or separate tickets?
-- Findings 16 and 18 are pinned as current behaviour: are either of them bugs?
+- Findings 16 and 18 are pinned as current behaviour: are either of them bugs? (16's
+  over-long-filename crash is already a strict xfail rather than a pin.)
+- Finding 26 is a bug in pipedream's bgpdump, not BIRD: who owns it, and does it get a
+  ticket?
 - Inert `mrtdump protocols all;` in the production config: separate ticket?
 - Promote into `fi_tests` (real renderer, CI) or keep it here?

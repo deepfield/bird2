@@ -45,7 +45,8 @@ class BirdCtl:
     """
     Client for BIRD's control socket. Reply lines are `NNNN-text` (more follows),
     ` text` (continues the previous code), `+text` (asynchronous) or `NNNN text` (last).
-    Codes 8xxx and 9xxx are errors.
+    Codes 8xxx and 9xxx are errors, and may come on a continuation line of a reply that
+    ends in success: `mrt dump` reports an unopenable file as `8009-...` and then `0000`.
     """
 
     def __init__(self, path: Path, timeout: float = 60.0):
@@ -54,7 +55,7 @@ class BirdCtl:
         self.sock.settimeout(timeout)
         self.sock.connect(str(path))
         self.buf = b""
-        code, _ = self._read_reply()
+        code, _, _ = self._read_reply()
         if code != 1:
             raise BirdError(f"unexpected greeting from {path}: code {code}")
 
@@ -70,25 +71,28 @@ class BirdCtl:
         line, self.buf = self.buf.split(b"\n", 1)
         return line.decode(errors="replace")
 
-    def _read_reply(self) -> Tuple[int, List[str]]:
-        lines = []
+    def _read_reply(self) -> Tuple[int, List[str], List[str]]:
+        """(final code, all lines, lines that carried an error code)"""
+        lines, errors = [], []
         while True:
             line = self._read_line()
             if line.startswith("+"):
                 continue
             if len(line) >= 5 and line[:4].isdigit() and line[4] in " -":
                 lines.append(line[5:])
+                if int(line[:4]) >= 8000:
+                    errors.append(line)
                 if line[4] == " ":
-                    return int(line[:4]), lines
+                    return int(line[:4]), lines, errors
             else:
                 lines.append(line[1:] if line.startswith(" ") else line)
 
     def cmd(self, command: str, check: bool = True) -> List[str]:
         """Run one CLI command and return the reply lines."""
         self.sock.sendall(command.encode() + b"\n")
-        code, lines = self._read_reply()
-        if check and code >= 8000:
-            raise BirdError(f"{command!r} failed ({code}): {' / '.join(lines)}")
+        code, lines, errors = self._read_reply()
+        if check and errors:
+            raise BirdError(f"{command!r} failed: {' / '.join(errors)}")
         return lines
 
 

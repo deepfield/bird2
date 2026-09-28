@@ -11,8 +11,9 @@ The RD field is present only for SAFI 128, and a VPN prefix length counts the la
 RD bits (a VPNv4 /24 prints as /112). A missing LOCAL_PREF or MED prints as 0.
 
 bgpdump exits 0 even on a malformed file: it logs `[warn]`/`[error]` lines (to stderr
-with -v) and may silently drop the broken record. run() therefore returns those lines
-and tests assert there are none.
+with -v) and may silently drop the broken record. It can also print raw memory (PLAN.md
+finding 26). run() therefore collects all of that as `problems`, alongside output lines
+that do not parse, and tests assert there are none.
 """
 
 import re
@@ -91,13 +92,25 @@ def parse_line(line: str) -> Row:
 
 
 def run(path: Union[str, Path], binary: Union[str, Path] = "bgpdump") -> Result:
-    proc = subprocess.run([str(binary), "-m", "-v", str(path)], capture_output=True, text=True)
+    proc = subprocess.run([str(binary), "-m", "-v", str(path)], capture_output=True)
+    stdout = proc.stdout.decode(errors="replace")
+    stderr = proc.stderr.decode(errors="replace")
     if proc.returncode != 0:
-        raise BgpdumpError(f"bgpdump exited {proc.returncode}: {proc.stderr.strip()}")
+        raise BgpdumpError(f"bgpdump exited {proc.returncode}: {stderr.strip()}")
     problems = []
-    for line in proc.stderr.splitlines():
+    for line in stderr.splitlines():
         m = _LOG_RE.match(line)
         if not m or m.group(1) not in ("info", "debug"):
             problems.append(line)
-    rows = [parse_line(line) for line in proc.stdout.splitlines() if line]
-    return Result(rows, problems, proc.stderr)
+    rows = []
+    for n, line in enumerate(stdout.splitlines(), 1):
+        if not line:
+            continue
+        if not line.isprintable():
+            problems.append(f"output line {n} holds non-text bytes: {line[:100]!r}")
+            continue
+        try:
+            rows.append(parse_line(line))
+        except BgpdumpError as e:
+            problems.append(f"output line {n}: {e}")
+    return Result(rows, problems, stderr)

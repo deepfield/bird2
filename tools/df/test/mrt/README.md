@@ -14,7 +14,7 @@ tools/df/test/mrt/build_bird.sh       # builds ./bird in the repo root, producti
 
 ```
 cd tools/df/test/mrt
-python3 -m pytest -q                  # whole suite, a few seconds
+python3 -m pytest -q                  # whole suite, about 20 s
 python3 -m pytest -q test_mrt_reader.py test_bgpdump.py   # no sudo, no bird
 ```
 

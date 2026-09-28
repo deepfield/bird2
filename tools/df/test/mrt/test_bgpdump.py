@@ -4,6 +4,8 @@ binary only logs are caught, and what the product's bgpdump makes of records it 
 or will not show, which is what analytics then sees.
 """
 
+import struct
+
 import pytest
 
 import bgpdump as b
@@ -92,3 +94,42 @@ def test_addpath_records_are_silently_dropped(bgpdump_bin, tmp_path):
     assert (record.add_path, record.entries[0].path_id) == (True, 7)
     result = run_bytes(tmp_path, bgpdump_bin, data)
     assert (result.rows, result.problems) == ([], [])
+
+
+def test_many_ipv4_records(bgpdump_bin, tmp_path):
+    """The control for finding 26: 3000 IPv4 records come out whole."""
+    records = b"".join(
+        rib(m.RIB_IPV4_UNICAST, i, prefix(f"10.{i >> 8}.{i & 255}.0/24"),
+            entry(attr(0x40, m.ORIGIN, b"\x00"), 1)) for i in range(3000))
+    result = run_bytes(tmp_path, bgpdump_bin, PEERS + records)
+    assert result.problems == []
+    assert len(result.rows) == 3000
+
+
+def many_vpn_records(peer_ip: str, n: int = 3000) -> bytes:
+    """n well-formed VPNv4 records, laid out as the fork writes them (RD 65000:<i>), all
+    from peer 0 of a one-peer table, like BIRD's dump of a table of static VPN routes."""
+    from test_mrt_reader import peer_entry, peer_table
+    mp = attr(0x00, m.MP_REACH_NLRI, bytes([16]) + bytes(10) + b"\xff\xff" + bytes([10, 99, 0, 1]))
+    med = attr(0x00, m.MED, struct.pack("!I", 7))
+    return peer_table(peer_entry(3, "0.0.0.0", peer_ip, 0), view=b"t") + b"".join(
+        rib(m.RIB_GENERIC, i, struct.pack("!HB", 1, 128) + bytes([112]) + bytes.fromhex("000001")
+            + struct.pack("<Q", (65000 << 32) | i) + bytes([198, 51, 100]), entry(med + mp, 0))
+        for i in range(n))
+
+
+def test_many_vpn_records_real_peer(bgpdump_bin, tmp_path):
+    """The other control for finding 26: the same records from a real IPv6 peer are fine."""
+    result = run_bytes(tmp_path, bgpdump_bin, many_vpn_records("fd99:1::2"))
+    assert result.problems == []
+    assert sorted(int(r.rd.split(":")[1]) for r in result.rows) == list(range(3000))
+
+
+@pytest.mark.xfail(strict=True, reason="finding 26: with peer :: (BIRD's peer 0) bgpdump "
+                                       "1.4.99.14 loses or garbles VPN routes after ~2996 records")
+def test_many_vpn_records_fake_peer(bgpdump_bin, tmp_path):
+    data = many_vpn_records("::")
+    assert len(list(m.parse_file(data).ribs())) == 3000          # well-formed
+    result = run_bytes(tmp_path, bgpdump_bin, data)
+    assert result.problems == []
+    assert sorted(int(r.rd.split(":")[1]) for r in result.rows) == list(range(3000))
