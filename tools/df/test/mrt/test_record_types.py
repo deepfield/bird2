@@ -216,12 +216,16 @@ def test_addpath_vpn_dump(static_vpn):
         assert [(a.flags, a.code, a.value) for a in e.attributes] == ATTRS_A["vpn4"]
 
 
+def test_wildcard_dump_covers_ip_tables(static_vpn):
+    """Precondition for the finding 12 xfail: the pattern dump happened and matched."""
+    views = [s.peer_table.view_name for s in m.read(static_vpn[1]["wildcard"]).sections]
+    assert {"t4", "t6"} <= set(views), views
+
+
 @pytest.mark.xfail(strict=True, reason="finding 12: a table pattern only matches ipv4/ipv6 "
                                        "tables (mrt.c:230-232), VPN tables are skipped")
 def test_wildcard_dump_includes_vpn_tables(static_vpn):
     views = [s.peer_table.view_name for s in m.read(static_vpn[1]["wildcard"]).sections]
-    # Precondition: the pattern dump happened and covered the IP tables.
-    assert {"t4", "t6"} <= set(views), views
     assert {"v4vpn", "v6vpn"} <= set(views), views
 
 

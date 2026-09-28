@@ -365,3 +365,113 @@ def test_other_record_types_are_kept_raw():
     f = m.parse_file(bgp4mp + PEERS + bytes.fromhex(RIB_V4_HEX))
     assert [(r.type, r.subtype) for r in f.other] == [(m.BGP4MP, 4)]
     assert f.rib("192.168.0.0/24").entries[0].peer_index == 1
+
+
+# -- BGP4MP ---------------------------------------------------------------------------
+
+def bgp_message(mtype, body=b""):
+    return b"\xff" * 16 + struct.pack("!HB", 19 + len(body), mtype) + body
+
+
+def update_body(attrs=b"", nlri=b"", withdrawn=b""):
+    return (struct.pack("!H", len(withdrawn)) + withdrawn
+            + struct.pack("!H", len(attrs)) + attrs + nlri)
+
+
+def bgp4mp(subtype, payload, peer_as=200, local_as=2500, peer="10.99.1.2", local="10.99.1.1"):
+    as4 = subtype in (m.BGP4MP_MESSAGE_AS4, m.BGP4MP_STATE_CHANGE_AS4)
+    fmt = "!IIHH" if as4 else "!HHHH"
+    afi = 1 if ip(peer).version == 4 else 2
+    body = struct.pack(fmt, peer_as, local_as, 3, afi) + ip(peer).packed + ip(local).packed
+    return record(m.BGP4MP, subtype, body + payload)
+
+
+BGP4MP_UPDATE_HEX = (
+    "65000000" "0010" "0004" "00000043"      # ts, BGP4MP, MESSAGE_AS4, length 67
+    "000000c8" "000009c4" "0003" "0001"      # peer AS 200, local AS 2500, ifindex 3, IPv4
+    "0a630102" "0a630101"                    # peer 10.99.1.2, local 10.99.1.1
+    "ffffffffffffffffffffffffffffffff" "002f" "02"   # marker, length 47, UPDATE
+    "0000" "0014"                            # no withdrawn routes, 20 bytes of attributes
+    "40010100"                               # ORIGIN IGP
+    "400206" "0201" "000000c8"               # AS_PATH SEQUENCE 200
+    "400304" "0a630102"                      # NEXT_HOP 10.99.1.2
+    "18c63364"                               # NLRI 198.51.100.0/24
+)
+
+
+def test_bgp4mp_update_literal():
+    data = bytes.fromhex(BGP4MP_UPDATE_HEX)
+    f = m.parse_file(data)
+    assert f.sections == []
+    [rec] = f.bgp4mp()
+    assert (rec.peer_as, rec.local_as, rec.ifindex, rec.afi) == (200, 2500, 3, 1)
+    assert (rec.peer_ip, rec.local_ip) == (ip("10.99.1.2"), ip("10.99.1.1"))
+    assert (rec.as4, rec.add_path, rec.message_type) == (True, False, m.BGP_UPDATE)
+    u = rec.update()
+    assert (u.withdrawn, u.nlri) == ([], [net("198.51.100.0/24")])
+    assert [(a.flags, a.code) for a in u.attributes] == [(0x40, 1), (0x40, 2), (0x40, 3)]
+    assert u.get(m.AS_PATH) == [(m.AS_SEQUENCE, [200])]
+    assert u.get(m.NEXT_HOP) == ip("10.99.1.2")
+    assert u.prefixes() == [net("198.51.100.0/24")]
+    for a in u.attributes:
+        assert data[a.offset] == a.flags and data[a.offset + 1] == a.code
+
+
+def test_bgp4mp_two_byte_session():
+    """A session without 4-byte ASNs: 2-byte header ASNs, 2-byte AS_PATH, AS4_PATH beside it."""
+    attrs = (attr(0x40, m.AS_PATH, bytes([2, 2]) + struct.pack("!HH", 65003, 23456))
+             + attr(0xC0, m.AS4_PATH, bytes([2, 2]) + struct.pack("!II", 65003, 4200000000))
+             + attr(0xC0, m.AGGREGATOR, struct.pack("!H", 23456) + ip("10.0.0.9").packed))
+    data = bgp4mp(m.BGP4MP_MESSAGE, bgp_message(m.BGP_UPDATE, update_body(attrs, prefix("10.0.0.0/8"))),
+                  peer_as=65003)
+    [rec] = m.parse_file(data).bgp4mp()
+    assert (rec.as4, rec.peer_as, rec.local_as) == (False, 65003, 2500)
+    u = rec.update()
+    assert u.get(m.AS_PATH) == [(m.AS_SEQUENCE, [65003, 23456])]
+    assert u.get(m.AS4_PATH) == [(m.AS_SEQUENCE, [65003, 4200000000])]
+    assert u.get(m.AGGREGATOR) == (23456, ip("10.0.0.9"))
+
+
+def test_bgp4mp_ipv6_transport_mp_reach():
+    nh = ip("fd99:4::2").packed + ip("fe80::2").packed
+    mp = (struct.pack("!HBB", 2, 1, len(nh)) + nh + b"\x00"
+          + prefix("2001:db8:1::/48") + prefix("2001:db8:2::/48"))
+    data = bgp4mp(m.BGP4MP_MESSAGE_AS4,
+                  bgp_message(m.BGP_UPDATE, update_body(attr(0x90, m.MP_REACH_NLRI, mp))),
+                  peer="fd99:4::2", local="fd99:4::1")
+    [rec] = m.parse_file(data).bgp4mp()
+    assert (rec.afi, rec.peer_ip) == (2, ip("fd99:4::2"))
+    u = rec.update()
+    assert u.nlri == []
+    assert u.get(m.MP_REACH_NLRI).next_hops == [ip("fd99:4::2"), ip("fe80::2")]
+    assert u.prefixes() == [net("2001:db8:1::/48"), net("2001:db8:2::/48")]
+
+
+def test_bgp4mp_state_change():
+    [rec] = m.parse_file(bgp4mp(m.BGP4MP_STATE_CHANGE_AS4, struct.pack("!HH", 5, 6))).bgp4mp()
+    assert (rec.old_state, rec.new_state, rec.message) == (5, m.BGP_STATE_ESTABLISHED, None)
+
+
+def test_bgp4mp_keepalive_is_not_an_update():
+    [rec] = m.parse_file(bgp4mp(m.BGP4MP_MESSAGE_AS4, bgp_message(m.BGP_KEEPALIVE))).bgp4mp()
+    assert rec.message_type == m.BGP_KEEPALIVE
+    with pytest.raises(m.MrtFormatError, match="not a BGP UPDATE"):
+        rec.update()
+
+
+@pytest.mark.parametrize("message,msg", [
+    (b"\x00" * 16 + struct.pack("!HB", 19, 4), "all-ones marker"),
+    (b"\xff" * 16 + struct.pack("!HB", 20, 4), "BGP message length 20, record holds 19"),
+])
+def test_bgp4mp_malformed_message(message, msg):
+    with pytest.raises(m.MrtFormatError, match=msg):
+        m.parse_file(bgp4mp(m.BGP4MP_MESSAGE_AS4, message)).bgp4mp()
+
+
+def test_complete_records_drops_a_partial_tail():
+    whole = bytes.fromhex(BGP4MP_UPDATE_HEX) + bytes.fromhex(PEER_TABLE_HEX)
+    assert m.complete_records(whole) == whole
+    assert m.complete_records(whole[:-5]) == bytes.fromhex(BGP4MP_UPDATE_HEX)
+    assert m.complete_records(whole[:85]) == bytes.fromhex(BGP4MP_UPDATE_HEX)   # in header 2
+    assert m.complete_records(whole[:70]) == b""                                  # in record 1
+    assert m.complete_records(whole[:8]) == b""

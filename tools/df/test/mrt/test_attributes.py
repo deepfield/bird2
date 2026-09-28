@@ -278,16 +278,18 @@ def test_ipv6_next_hop_on_ipv4_route(dumps):
     assert entry(dumps, V6_ON_V4.prefix).next_hops() == [ip("2001:db8::7")]
 
 
+def test_stale_next_hop_setup(dumps):
+    """Precondition for the finding 13 xfail, kept out of it so a broken setup cannot pass
+    for the bug: some route without a next hop is dumped after one with a next hop."""
+    order = [str(r.network) for r in dumps["t6s"][1].ribs()]
+    first_nh = min(order.index(p) for p in STALE_WITH_NH)
+    assert [p for p in order[first_nh + 1:] if p in STALE_WITHOUT_NH], order
+
+
 @pytest.mark.xfail(strict=True, reason="finding 13: bws->mp_next_hop is not reset between RIB "
                                        "entries, so an entry without a next hop inherits one")
 def test_no_stale_next_hop(dumps):
     ribs = list(dumps["t6s"][1].ribs())
-    order = [str(r.network) for r in ribs]
-    first_nh = min(order.index(p) for p in STALE_WITH_NH)
-    followers = [p for p in order[first_nh + 1:] if p in STALE_WITHOUT_NH]
-    # Precondition, so the test cannot pass vacuously: some route without a next hop
-    # is dumped after one with a next hop.
-    assert followers, f"dump order gives the bug no chance: {order}"
     for rib in ribs:
         if str(rib.network) in STALE_WITHOUT_NH:
             [e] = rib.entries

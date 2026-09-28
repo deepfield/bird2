@@ -14,8 +14,10 @@ merged_session_<ip>_<afi> for ipv4/ipv6, fed with the device's mitigation static
 mit_bridge pipe, and an analytics_mrt pipe copies only RTS_BGP routes on to the dumped
 table. Other families (vpn4, vpn6, ...) bind the dumped table directly either way.
 
-The only lines the renderer does not produce are the log file and
-`debug protocols { events }`, which lets tests see when a periodic dump is complete.
+The only lines the renderer does not produce are the log file,
+`debug protocols { events }`, which lets tests see when a periodic dump is complete, and
+optionally `mrtdump "<file>";`, which turns the template's inert `mrtdump all;` into a
+BGP4MP capture of every message the DUT receives (PLAN.md fact 6).
 """
 
 from dataclasses import dataclass, field
@@ -80,10 +82,11 @@ def dump_file(dumpdir: Path, remote_as, remote_ip, family) -> Path:
 
 
 def render_dut(log, dumpdir, sessions: List[Session], mrt_period: int,
-               mitigations: Optional[Dict[str, str]] = None) -> str:
+               mitigations: Optional[Dict[str, str]] = None, bgp4mp_file=None) -> str:
     """`mitigations`: afi -> prefix of a static in dev_<afi>_<DEVICE_ID>, bridged into
-    every merged session."""
+    every merged session. `bgp4mp_file`: where to capture received BGP messages."""
     out = [f'log "{log}" all;\ndebug protocols {{ events }};\n',
+           f'mrtdump "{bgp4mp_file}";\n' if bgp4mp_file else "",
            "router id 0.0.0.1;\ndefine myas = 0;\n\n"
            "vpn4 table mastervpn4;\nvpn6 table mastervpn6;\n"
            "ipv4 table masteripv4mpls;\nipv6 table masteripv6mpls;\n",

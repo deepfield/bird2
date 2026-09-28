@@ -3,7 +3,8 @@ Strict, dependency-free reader for the MRT files BIRD writes (RFC 6396).
 
 TABLE_DUMP_V2 is decoded fully: PEER_INDEX_TABLE, the RIB_IPV4/IPV6 unicast and
 multicast subtypes, their ADDPATH variants (RFC 8050) and RIB_GENERIC for AFI 1/2 with
-SAFI 1/2/128. Records of any other type are kept raw in MrtFile.other.
+SAFI 1/2/128. Records of any other type are kept raw in MrtFile.other; BGP4MP ones can be
+decoded with parse_bgp4mp() (MrtFile.bgp4mp()) and their UPDATEs with parse_update().
 
 "Strict" means every length and count is checked and all bytes must be accounted for:
 a malformed record raises MrtFormatError with its file offset instead of being skipped.
@@ -12,7 +13,8 @@ label stack are returned exactly as written, so tests can assert on BIRD's bytes
 
 Path attributes in a RIB entry use the table-dump layout, which differs from the wire
 in one place: MP_REACH_NLRI keeps only the next hop length and next hop (RFC 6396
-4.3.4). parse_mp_reach(table_dump=False) decodes the wire layout.
+4.3.4). parse_mp_reach(table_dump=False) decodes the wire layout. On the wire, AS_PATH
+and AGGREGATOR carry 2-byte ASNs unless the session negotiated 4-byte ones (as4=False).
 """
 
 import ipaddress
@@ -208,8 +210,8 @@ class Attribute:
     value: bytes
     offset: int          # file offset of the attribute header
 
-    def decode(self, table_dump: bool = True):
-        return decode_attribute(self.code, self.value, table_dump)
+    def decode(self, table_dump: bool = True, as4: bool = True):
+        return decode_attribute(self.code, self.value, table_dump, as4)
 
 
 def parse_attributes(data: bytes, base: int = 0) -> List[Attribute]:
@@ -284,7 +286,7 @@ def _origin(v: bytes) -> int:
     return o
 
 
-def _as_path(v: bytes) -> List[Tuple[int, List[int]]]:
+def _as_path(v: bytes, as4: bool = True) -> List[Tuple[int, List[int]]]:
     """Segments as (type, [asn, ...]); TABLE_DUMP_V2 always uses 4-byte ASNs."""
     c = _Cursor(v)
     segments = []
@@ -293,7 +295,8 @@ def _as_path(v: bytes) -> List[Tuple[int, List[int]]]:
         if stype not in (AS_SET, AS_SEQUENCE, AS_CONFED_SEQUENCE, AS_CONFED_SET):
             raise MrtFormatError(f"AS_PATH segment type {stype}")
         count = c.u8("AS_PATH segment length")
-        segments.append((stype, [c.u32("ASN") for _ in range(count)]))
+        asn = c.u32 if as4 else c.u16
+        segments.append((stype, [asn("ASN") for _ in range(count)]))
     return segments
 
 
@@ -306,9 +309,9 @@ def _atomic(v: bytes) -> bool:
     return True
 
 
-def _aggregator(v: bytes) -> Tuple[int, ipaddress.IPv4Address]:
-    _fixed(v, 8, "AGGREGATOR")
-    return struct.unpack("!I", v[:4])[0], ipaddress.IPv4Address(v[4:])
+def _aggregator(v: bytes, as4: bool = True) -> Tuple[int, ipaddress.IPv4Address]:
+    _fixed(v, 8 if as4 else 6, "AGGREGATOR")
+    return struct.unpack("!I" if as4 else "!H", v[:-4])[0], ipaddress.IPv4Address(v[-4:])
 
 
 _DECODERS = {
@@ -329,10 +332,14 @@ _DECODERS = {
 }
 
 
-def decode_attribute(code: int, value: bytes, table_dump: bool = True):
+def decode_attribute(code: int, value: bytes, table_dump: bool = True, as4: bool = True):
     """Decoded value of one attribute; unknown codes come back as raw bytes."""
     if code == MP_REACH_NLRI:
         return parse_mp_reach(value, table_dump)
+    if code == AS_PATH:
+        return _as_path(value, as4)
+    if code == AGGREGATOR:
+        return _aggregator(value, as4)
     decoder = _DECODERS.get(code)
     return decoder(value) if decoder else value
 
@@ -418,6 +425,15 @@ def _parse_prefix(c: _Cursor, afi: int) -> IPNetwork:
     return _network(afi, c.take((plen + 7) // 8, "prefix"), plen, at)
 
 
+def parse_prefixes(data: bytes, afi: int, base: int = 0) -> List[IPNetwork]:
+    """A run of plain NLRI prefixes (length byte + prefix bytes), as in an UPDATE."""
+    c = _Cursor(data, base)
+    out = []
+    while not c.done():
+        out.append(_parse_prefix(c, afi))
+    return out
+
+
 def _parse_vpn_nlri(c: _Cursor, afi: int) -> VpnPrefix:
     at = c.offset
     bits = c.u8("NLRI length")
@@ -472,6 +488,149 @@ def parse_rib(rec: Record) -> Rib:
     return Rib(rec, sequence, afi, safi, add_path, prefix, entries)
 
 
+# -- BGP4MP ---------------------------------------------------------------------
+
+BGP4MP_STATE_CHANGE = 0
+BGP4MP_MESSAGE = 1
+BGP4MP_MESSAGE_AS4 = 4
+BGP4MP_STATE_CHANGE_AS4 = 5
+BGP4MP_MESSAGE_LOCAL = 6
+BGP4MP_MESSAGE_AS4_LOCAL = 7
+BGP4MP_MESSAGE_ADDPATH = 8
+BGP4MP_MESSAGE_AS4_ADDPATH = 9
+BGP4MP_MESSAGE_LOCAL_ADDPATH = 10
+BGP4MP_MESSAGE_AS4_LOCAL_ADDPATH = 11
+_BGP4MP_AS4 = {BGP4MP_MESSAGE_AS4, BGP4MP_STATE_CHANGE_AS4, BGP4MP_MESSAGE_AS4_LOCAL,
+               BGP4MP_MESSAGE_AS4_ADDPATH, BGP4MP_MESSAGE_AS4_LOCAL_ADDPATH}
+_BGP4MP_STATE = {BGP4MP_STATE_CHANGE, BGP4MP_STATE_CHANGE_AS4}
+_BGP4MP_ADDPATH = {BGP4MP_MESSAGE_ADDPATH, BGP4MP_MESSAGE_AS4_ADDPATH,
+                   BGP4MP_MESSAGE_LOCAL_ADDPATH, BGP4MP_MESSAGE_AS4_LOCAL_ADDPATH}
+
+BGP_OPEN, BGP_UPDATE, BGP_NOTIFICATION, BGP_KEEPALIVE = 1, 2, 3, 4
+BGP_HEADER_LEN = 19
+BGP_STATE_ESTABLISHED = 6
+
+
+@dataclass
+class Bgp4mp:
+    """A BGP4MP record: a BGP message as received (or sent), or a session state change."""
+    record: Record
+    peer_as: int
+    local_as: int
+    ifindex: int
+    afi: int                  # of the session's transport
+    peer_ip: IPAddress
+    local_ip: IPAddress
+    message: Optional[bytes] = None      # whole BGP message, header included
+    old_state: Optional[int] = None
+    new_state: Optional[int] = None
+
+    @property
+    def as4(self) -> bool:
+        """4-byte ASNs, in the record header and in the message's AS_PATH/AGGREGATOR."""
+        return self.record.subtype in _BGP4MP_AS4
+
+    @property
+    def add_path(self) -> bool:
+        return self.record.subtype in _BGP4MP_ADDPATH
+
+    @property
+    def message_type(self) -> Optional[int]:
+        return self.message[18] if self.message else None
+
+    def update(self) -> "BgpUpdate":
+        if self.add_path:
+            raise MrtFormatError("ADD-PATH UPDATEs are not supported", self.record.offset)
+        return parse_update(self.message, self.as4, self.record.body_offset + len(
+            self.record.body) - len(self.message))
+
+
+def parse_bgp4mp(rec: Record) -> Bgp4mp:
+    c = _Cursor(rec.body, rec.body_offset)
+    if rec.type != BGP4MP:
+        raise MrtFormatError(f"record type {rec.type} is not BGP4MP", rec.offset)
+    as4 = rec.subtype in _BGP4MP_AS4
+    peer_as = c.u32("peer AS") if as4 else c.u16("peer AS")
+    local_as = c.u32("local AS") if as4 else c.u16("local AS")
+    ifindex = c.u16("interface index")
+    at = c.offset
+    afi = c.u16("address family")
+    if afi not in (AFI_IPV4, AFI_IPV6):
+        raise MrtFormatError(f"BGP4MP address family {afi}", at)
+    size = 4 if afi == AFI_IPV4 else 16
+    peer_ip = ipaddress.ip_address(c.take(size, "peer IP"))
+    local_ip = ipaddress.ip_address(c.take(size, "local IP"))
+    out = Bgp4mp(rec, peer_as, local_as, ifindex, afi, peer_ip, local_ip)
+    if rec.subtype in _BGP4MP_STATE:
+        out.old_state, out.new_state = c.u16("old state"), c.u16("new state")
+        c.expect_end("BGP4MP state change")
+        return out
+    if rec.subtype not in (_BGP4MP_AS4 | _BGP4MP_ADDPATH | {BGP4MP_MESSAGE, BGP4MP_MESSAGE_LOCAL}):
+        raise MrtFormatError(f"BGP4MP subtype {rec.subtype} is not supported", rec.offset)
+    at = c.offset
+    msg = c.take(len(rec.body) - c.pos, "BGP message")
+    if len(msg) < BGP_HEADER_LEN or msg[:16] != b"\xff" * 16:
+        raise MrtFormatError("BGP message without the all-ones marker", at)
+    if struct.unpack("!H", msg[16:18])[0] != len(msg):
+        raise MrtFormatError(f"BGP message length {struct.unpack('!H', msg[16:18])[0]}, "
+                             f"record holds {len(msg)}", at)
+    out.message = msg
+    return out
+
+
+@dataclass
+class BgpUpdate:
+    withdrawn: List[IPNetwork]           # IPv4, from the UPDATE's own field
+    attributes: List[Attribute]          # wire layout
+    nlri: List[IPNetwork]                # IPv4, from the UPDATE's own field
+    as4: bool
+
+    def attr(self, code: int) -> Optional[Attribute]:
+        for a in self.attributes:
+            if a.code == code:
+                return a
+        return None
+
+    def get(self, code: int):
+        a = self.attr(code)
+        return a.decode(table_dump=False, as4=self.as4) if a else None
+
+    def prefixes(self) -> List[IPNetwork]:
+        """Everything announced: the IPv4 NLRI field plus MP_REACH_NLRI (plain SAFIs)."""
+        out = list(self.nlri)
+        mp = self.get(MP_REACH_NLRI)
+        if mp is not None and mp.safi in (SAFI_UNICAST, SAFI_MULTICAST):
+            out += parse_prefixes(mp.nlri, mp.afi)
+        return out
+
+
+def parse_update(message: bytes, as4: bool = True, base: int = 0) -> BgpUpdate:
+    """A BGP UPDATE message, header included; `base` is its file offset, if known."""
+    if len(message) < BGP_HEADER_LEN or message[18] != BGP_UPDATE:
+        raise MrtFormatError("not a BGP UPDATE message", base)
+    c = _Cursor(message[BGP_HEADER_LEN:], base + BGP_HEADER_LEN)
+    wlen = c.u16("withdrawn routes length")
+    at = c.offset
+    withdrawn = parse_prefixes(c.take(wlen, "withdrawn routes"), AFI_IPV4, at)
+    alen = c.u16("path attributes length")
+    at = c.offset
+    attrs = parse_attributes(c.take(alen, "path attributes"), at)
+    at = c.offset
+    nlri = parse_prefixes(c.take(len(c.data) - c.pos, "NLRI"), AFI_IPV4, at)
+    return BgpUpdate(withdrawn, attrs, nlri, as4)
+
+
+def complete_records(data: bytes) -> bytes:
+    """`data` without a partly written last record, for files BIRD is still appending to."""
+    pos = 0
+    while len(data) - pos >= MRT_HEADER_LEN:
+        end = pos + MRT_HEADER_LEN + struct.unpack_from("!I", data, pos + 8)[0]
+        if end > len(data):
+            break
+        pos = end
+    return data[:pos]
+
+
 # -- files ----------------------------------------------------------------------
 
 @dataclass
@@ -495,6 +654,9 @@ class MrtFile:
         for rib in self.ribs():
             out.setdefault(rib.network, []).append(rib)
         return out
+
+    def bgp4mp(self) -> List[Bgp4mp]:
+        return [parse_bgp4mp(r) for r in self.other if r.type == BGP4MP]
 
     def rib(self, network: str) -> Rib:
         """The single RIB record for `network` (e.g. '10.0.0.0/24'); fails if not exactly one."""

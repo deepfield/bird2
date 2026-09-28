@@ -5,12 +5,13 @@ analytics. Every BGP path attribute in a dump must be byte-correct, value *and* 
 and so must the fork-specific parts: VPN `RIB_GENERIC` records, the MP_REACH next hop, and
 how dumps are written to disk.
 
-## Status: phases 0–4 done (2026-09-28)
+## Status: phases 0–5 done (2026-09-28)
 
 Branch `2.0.4-mrt-dump-tests` (off `2.0.4`). BIRD builds on the dev box
 (`install_prereq.sh`, `build_bird.sh`), the harness runs, and the production-path test
-passes, and so do tier 1 and the VPN records: 161 tests and 4 strict xfails (findings 4,
-12, 13, 14) in about 11 s, namespaces cleaned up after each run. Next: phase 5.
+passes, and so do tier 1, the VPN records and tier 2: 201 tests and 6 strict xfails
+(findings 4 ×3, 12, 13, 14) in about 14 s, namespaces cleaned up after each run. Next:
+phase 6.
 
 Breakage checks (2026-09-28, BIRD rebuilt in a throwaway worktree, peers on the normal
 build): forcing the RIB entry's peer index to 0 (`mrt.c:555`) fails the 8 peer-index
@@ -31,7 +32,7 @@ available. Its design and findings are carried over below; its code is not.
 | peers | BIRD2 announcers, no gobgp: this is a regression suite for BIRD's dump, not an interop test |
 | peer binary | same as the binary under test by default; `PEER_BIRD=` overrides it with a known-good build |
 | dumps | forced with `mrt dump table <t> to "<f>"`; tests never wait for `period` |
-| configs | minimal, purpose-built, rendered by `birdlab.py` (the real `deepy.bird.config` renderer is phase A) |
+| configs | tier 1 and static VPN: minimal, in the test module. Production path, VPN over BGP and tier 2: `prodconf.py`, a copy of pipedream's renderer, so received attributes go through the production template (it has no import filters to blame) |
 | consumer check | every dump is also run through `bgpdump -m` and the fields analytics reads are asserted; skipped if bgpdump is missing, `BGPDUMP=` overrides the path |
 | known bugs | findings 4, 12, 13, 14: the test asserts the correct behaviour and is marked `xfail(strict=True)` citing the finding, so a fix flips it and forces the marker off; other findings are pinned as current behaviour |
 
@@ -63,7 +64,7 @@ tools/df/test/mrt/
   test_harness.py          smoke: dumps from a daemon in a namespace, a BGP session over veth
   test_production_path.py  pipedream's rendered config, merged + analytics sessions, periodic dumps
   test_attributes.py       tier 1: filter-set attributes, byte-exact, no peer
-  test_attributes_bgp.py   tier 2: attributes received over BGP
+  test_attributes_bgp.py   tier 2: attributes received over BGP, checked against the UPDATE
   prodconf.py              DUT configs as pipedream's renderer writes them (phases 2, 4)
   test_record_types.py     VPN RIB_GENERIC: static routes byte-exact, received over BGP
   test_dump_mechanics.py   >2048 routes, append mode, table selection, stale next hop
@@ -112,17 +113,25 @@ per prefix. A failure therefore points at BIRD's MRT encoder (`proto/mrt/mrt.c` 
 `bgp_encode_attrs`) and nothing else: no session, no filters in the way, no peer
 behaviour to explain away. One daemon and one forced dump serve the whole module.
 
-**Tier 2: attributes off the wire** (`test_attributes_bgp.py`). A BIRD announcer
-originates static routes and sets attributes in its export filter; the DUT decodes,
-stores and re-encodes them. This is the only tier that can assert the *received*
-attribute flags. It cross-checks the RIB dump against the DUT's BGP4MP capture
-(`mrtdump "<file>"; mrtdump protocols all;`) of the UPDATE that carried the route.
-Two sessions, because LOCAL_PREF survives only from an internal peer:
+**Tier 2: attributes off the wire** (`test_attributes_bgp.py`). BIRD announcers
+originate static routes and set attributes in their export filters; the DUT, on the
+production config, decodes, stores and re-encodes them. This is the only tier that can
+assert the *received* attribute flags. Every RIB entry is compared with the UPDATE that
+carried the route, taken from the DUT's own BGP4MP capture (`mrtdump "<file>";` on top of
+the template's `mrtdump all;`). Allowed differences, each a finding: NEXT_HOP loses its
+flags (5); MP_REACH_NLRI shrinks to the global next hop, flags 0x00, appended last (2,
+18, 22); an eBGP route gains LOCAL_PREF 100, flags 0x00 (5); AS4_PATH is merged into a
+4-byte AS_PATH. Anything else must match, flags included.
 
-| session | AS | DUT side | why |
-|---|---|---|---|
-| `peer_e` | 65001 | 10.99.1.1 / fd99:1::1 | eBGP, the shape of an analytics collection session |
-| `peer_i` | 65000 | 10.99.2.1 / fd99:2::1 | iBGP, the only way a received LOCAL_PREF is kept |
+| peer | session (DUT local AS 2500) | covers |
+|---|---|---|
+| `peer_e` | eBGP AS 200, IPv4 transport | ORIGIN, 32-bit ASN in the path, MED, 70 communities (extended length), ext and large communities, IPv6 route with global + link-local |
+| `peer_i` | iBGP AS 2500 | received LOCAL_PREF kept, ORIGINATOR_ID, CLUSTER_LIST |
+| `peer_2b` | eBGP AS 65003, `enable as4 off` | AS_PATH with AS_TRANS plus AS4_PATH on the wire, merged in the dump |
+| `peer_x6` | eBGP AS 64999, IPv6 transport, multihop, extended next hop | IPv4 routes with an IPv6 next hop (finding 4), 16-byte IPv6 next hop |
+
+Known-bug preconditions (the bug's trigger really happened) are separate, non-xfail
+tests, so a broken setup cannot pass as the expected failure.
 
 ## Findings carried over
 
@@ -146,7 +155,10 @@ re-verified once this harness runs**, then pinned by a test.
    `extended next hop on` for ipv4, so these routes reach analytics without a next hop.
    **Test: `xfail(strict=True)`** (`test_attributes.py`); *verified 2026-09-28, it fails
    because the entry has no next hop at all.* bgpdump prints such an entry with next hop
-   `255.255.255.255` (finding 24): the DP-4605 / DP-6093 symptom.
+   `255.255.255.255` (finding 24): the DP-4605 / DP-6093 symptom. *Also confirmed over
+   BGP in the production session shape* (`test_attributes_bgp.py`): a peer with extended
+   next hop on an IPv6 session sends IPv4 routes with an IPv6 next hop, the DUT stores it,
+   the dump drops it and bgpdump shows `255.255.255.255`.
 5. **Attribute flags differ by provenance**, and the dump shows it:
    - filter-set attributes → all flags `0x00` (the eattr has none to write back);
    - received transitive attributes → flags preserved (`0x40`, `0x80`, `0xc0`);
@@ -293,31 +305,43 @@ The dev box's `/usr/local/etc/bird/bird.conf` is rendered by pipedream's
     no LOCAL_PREF or MED as `0`, no AS_PATH as an empty field. So `255.255.255.255` in
     analytics means "the dump had no next hop for this route". Pinned in `test_bgpdump.py`.
 
+25. **BGP4MP details** (not used in production, fact 6). The OPEN, and a KEEPALIVE that
+    arrives before OpenConfirm, are written as 2-byte `BGP4MP_MESSAGE` records even on
+    4-byte-ASN sessions (`packets.c:97-106`); UPDATEs follow the session. State changes
+    are always `STATE_CHANGE_AS4`, and those from before a connection exists (Idle →
+    Active) carry peer and local IP `0.0.0.0` / `::`, as there is no socket to take them
+    from (`packets.c:104`). Pinned in `test_attributes_bgp.py`.
+
+Tier 2 (`test_attributes_bgp.py`) verified finding 5 for received attributes: flags come
+through as sent (ORIGIN, AS_PATH `0x40`; MED `0x80`; COMMUNITY `0xc0`, `0xd0` with the
+extended length; EXT/LARGE_COMMUNITY `0xc0`; ORIGINATOR_ID, CLUSTER_LIST `0x80`; iBGP
+LOCAL_PREF `0x40`), NEXT_HOP drops to `0x00`, and an eBGP route's default LOCAL_PREF is
+`0x00`.
+
 Tier 1 (`test_attributes.py`) also verified findings 2, 3, 5 and 18 byte for byte: IPv6
 next hops in the truncated MP_REACH_NLRI, IPv4 ones in NEXT_HOP, every filter-set flag
 byte `0x00` (the MP_REACH one included) apart from the extended-length bit.
 
 ## Coverage
 
-| attribute | code | tier 1 | tier 2 | notes |
-|---|---|---|---|---|
-Tier 1 is done (✅, byte-exact incl. flags, plus the `bgpdump -m` field where bgpdump
-prints one); the tier 2 column is still planned.
+Both tiers done: ✅ byte-exact incl. flags, plus the `bgpdump -m` field where bgpdump
+prints one; tier 2 also against the UPDATE that carried the route.
 
 | attribute | code | tier 1 | tier 2 | notes |
 |---|---|---|---|---|
-| ORIGIN | 1 | ✅ all three values | ✓ | |
-| AS_PATH | 2 | ✅ order, 32-bit ASN; 300 ASNs → 45 + 255 segments, extended length | ✓ | 4-byte ASNs always |
-| NEXT_HOP | 3 | ✅ v4 legacy; v6-on-v4 dropped (4, xfail) | value + flag loss (5) | |
-| MED | 4 | ✅ 0, 1, 2³²−1 | ✓ | |
-| LOCAL_PREF | 5 | ✅ | iBGP kept / eBGP defaulted | eBGP default 100: `test_production_path.py` |
-| COMMUNITY | 8 | ✅ insertion order kept; 63 → plain, 64 → extended length | ✓ | |
-| ORIGINATOR_ID / CLUSTER_LIST | 9 / 10 | ✅ | — | |
-| MP_REACH_NLRI | 14 | ✅ truncated form (2), flags (18), IPv4-mapped; stale next hop (13, xfail) | 16- and 32-byte next hops | 32-byte received, global kept: `test_production_path.py` |
-| EXT_COMMUNITY | 16 | ✅ rt 2-octet AS, ro IPv4, rt 4-octet AS | ✓ | |
+| ORIGIN | 1 | ✅ all three values | ✅ | |
+| AS_PATH | 2 | ✅ order, 32-bit ASN; 300 ASNs → 45 + 255 segments, extended length | ✅ incl. AS4_PATH merge | 4-byte ASNs always |
+| NEXT_HOP | 3 | ✅ v4 legacy; v6-on-v4 dropped (4, xfail) | ✅ value kept, flag lost (5); v6-on-v4 dropped (4, xfail) | |
+| MED | 4 | ✅ 0, 1, 2³²−1 | ✅ | |
+| LOCAL_PREF | 5 | ✅ | ✅ iBGP kept `0x40` / eBGP defaulted `0x00` | |
+| COMMUNITY | 8 | ✅ insertion order kept; 63 → plain, 64 → extended length | ✅ extended-length flag kept | |
+| ORIGINATOR_ID / CLUSTER_LIST | 9 / 10 | ✅ | ✅ from iBGP | |
+| MP_REACH_NLRI | 14 | ✅ truncated form (2), flags (18), IPv4-mapped; stale next hop (13, xfail) | ✅ 16-byte (multihop peer), 32-byte (direct) | |
+| AS4_PATH | 17 | — | ✅ never in a dump, merged into AS_PATH | |
+| EXT_COMMUNITY | 16 | ✅ rt 2-octet AS, ro IPv4, rt 4-octet AS | ✅ | |
 | IPV6_EXT_COMMUNITY | 25 | — | — | DEFBE-9172 is not merged into `2.0.4`: this build cannot produce it |
-| LARGE_COMMUNITY | 32 | ✅ incl. 32-bit fields | ✓ | |
-| prefix encoding | — | ✅ /0, /32, /128, /1, /9, /10, /17, /25, /33, no attributes | ✓ | |
+| LARGE_COMMUNITY | 32 | ✅ incl. 32-bit fields | ✅ | |
+| prefix encoding | — | ✅ /0, /32, /128, /1, /9, /10, /17, /25, /33, no attributes | ✅ | |
 | VPN RIB_GENERIC | — | ✅ static vpn4/vpn6, 3 RD types, byte-exact | ✅ vpn4/vpn6 mpls session, prodconf | (11) verified; (12), (14) xfail |
 
 ### Known gaps
@@ -327,8 +351,6 @@ prints one); the tier 2 column is still planned.
   `EAF_TYPE_INT` in 2.0.4 (`proto/bgp/config.Y:287`), which cannot hold the 8-byte value,
   and a BIRD announcer has the same limitation. Uncovered.
 - **IPV6_EXT_COMMUNITY (25)**: needs DEFBE-9172 merged into `2.0.4`.
-- **AS4_PATH (17)**: an announcer with `enable as4 off` sends one, but the DUT merges it
-  into AS_PATH on receipt, so a dump should never contain it. Assert that, nothing more.
 - **AS_SET segments**: no way to build one in 2.0.4 filters. Uncovered.
 - **Unknown attribute codes**: the reader keeps them raw, but BIRD cannot originate one.
   Uncovered.
@@ -347,7 +369,7 @@ Agreed 2026-09-28.
    Finding 17. If the suite had one test, it would be this one.
 3. **Tier 1 attributes.** *Done.* Findings 2–5, 18.
 4. **VPN RIB_GENERIC.** *Done.* Findings 11, 12, 14.
-5. **Tier 2 attributes over BGP**, flags and the BGP4MP cross-check.
+5. **Tier 2 attributes over BGP**, flags and the BGP4MP cross-check. *Done.*
 6. **Dump mechanics and edge cases.** Findings 13, 15, 16.
 7. **Later phases** (unchanged in intent):
    - **A. Table topology / isolation.** Route injected by peer A lands in A's table and
