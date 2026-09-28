@@ -1,12 +1,14 @@
 """
-Tests for the bgpdump wrapper: line parsing (no bgpdump needed), and that problems the
-real binary only logs are caught.
+Tests for the bgpdump wrapper: line parsing (no bgpdump needed), that problems the real
+binary only logs are caught, and what the product's bgpdump makes of records it cannot
+or will not show, which is what analytics then sees.
 """
 
 import pytest
 
 import bgpdump as b
-from test_mrt_reader import PEER_TABLE_HEX, RIB_V4_HEX
+import mrt_reader as m
+from test_mrt_reader import PEER_TABLE_HEX, PEERS, RIB_V4_HEX, attr, entry, prefix, rib
 
 LINE_V4 = ("TABLE_DUMP_V2(1,1)|1790615057|B|10.99.1.2|65001|10.50.0.0/16|65001|IGP|"
            "10.99.1.2|100|0|65001:5|NAG||")
@@ -56,3 +58,37 @@ def test_truncated_file_is_a_problem(bgpdump_bin, tmp_path):
     result = b.run(path, bgpdump_bin)
     assert result.rows == []
     assert any("[error]" in p for p in result.problems), result.stderr
+
+
+def run_bytes(tmp_path, bgpdump_bin, data: bytes) -> b.Result:
+    path = tmp_path / "built.mrt"
+    path.write_bytes(data)
+    return b.run(path, bgpdump_bin)
+
+
+@pytest.mark.parametrize("subtype,network", [(m.RIB_IPV4_UNICAST, "10.0.0.0/8"),
+                                             (m.RIB_IPV6_UNICAST, "2001:db8::/32")])
+def test_missing_attributes_print_placeholders(bgpdump_bin, tmp_path, subtype, network):
+    """
+    An entry without attributes: bgpdump fills in placeholders instead of leaving the
+    fields empty. `255.255.255.255` is its "no next hop", for IPv6 entries too: the
+    symptom of DP-4605 / DP-6093, and what finding 4 produces.
+    """
+    result = run_bytes(tmp_path, bgpdump_bin, PEERS + rib(subtype, 0, prefix(network), entry(b"", 1)))
+    assert result.problems == []
+    r = result.row(network)
+    assert (r.as_path, r.origin, r.next_hop) == ("", "INCOMPLETE", "255.255.255.255")
+    assert (r.local_pref, r.med, r.communities) == (0, 0, "")
+
+
+def test_addpath_records_are_silently_dropped(bgpdump_bin, tmp_path):
+    """
+    bgpdump 1.4.99.14 skips RIB_*_ADDPATH records entirely: no rows and no warning. The
+    strict reader shows the record is well formed. Analytics would lose such routes.
+    """
+    data = PEERS + rib(m.RIB_IPV4_UNICAST_ADDPATH, 0, prefix("10.0.0.0/8"),
+                       entry(attr(0x40, m.ORIGIN, b"\x00"), 1, path_id=7))
+    [record] = m.parse_file(data).ribs()
+    assert (record.add_path, record.entries[0].path_id) == (True, 7)
+    result = run_bytes(tmp_path, bgpdump_bin, data)
+    assert (result.rows, result.problems) == ([], [])

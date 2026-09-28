@@ -5,12 +5,12 @@ analytics. Every BGP path attribute in a dump must be byte-correct, value *and* 
 and so must the fork-specific parts: VPN `RIB_GENERIC` records, the MP_REACH next hop, and
 how dumps are written to disk.
 
-## Status: phases 0–3 done (2026-09-28)
+## Status: phases 0–4 done (2026-09-28)
 
 Branch `2.0.4-mrt-dump-tests` (off `2.0.4`). BIRD builds on the dev box
 (`install_prereq.sh`, `build_bird.sh`), the harness runs, and the production-path test
-passes, and so does tier 1: 119 tests and 2 strict xfails (findings 4 and 13) in about
-8 s, namespaces cleaned up after each run. Next: phase 4.
+passes, and so do tier 1 and the VPN records: 161 tests and 4 strict xfails (findings 4,
+12, 13, 14) in about 11 s, namespaces cleaned up after each run. Next: phase 5.
 
 Breakage checks (2026-09-28, BIRD rebuilt in a throwaway worktree, peers on the normal
 build): forcing the RIB entry's peer index to 0 (`mrt.c:555`) fails the 8 peer-index
@@ -64,7 +64,8 @@ tools/df/test/mrt/
   test_production_path.py  pipedream's rendered config, merged + analytics sessions, periodic dumps
   test_attributes.py       tier 1: filter-set attributes, byte-exact, no peer
   test_attributes_bgp.py   tier 2: attributes received over BGP
-  test_record_types.py     VPN RIB_GENERIC, prefix encodings
+  prodconf.py              DUT configs as pipedream's renderer writes them (phases 2, 4)
+  test_record_types.py     VPN RIB_GENERIC: static routes byte-exact, received over BGP
   test_dump_mechanics.py   >2048 routes, append mode, table selection, stale next hop
 ```
 
@@ -144,7 +145,8 @@ re-verified once this harness runs**, then pinned by a test.
    skip IPv6 next hops for IPv4 routes during MRT dump"). Production enables
    `extended next hop on` for ipv4, so these routes reach analytics without a next hop.
    **Test: `xfail(strict=True)`** (`test_attributes.py`); *verified 2026-09-28, it fails
-   because the entry has no next hop at all.*
+   because the entry has no next hop at all.* bgpdump prints such an entry with next hop
+   `255.255.255.255` (finding 24): the DP-4605 / DP-6093 symptom.
 5. **Attribute flags differ by provenance**, and the dump shows it:
    - filter-set attributes → all flags `0x00` (the eattr has none to write back);
    - received transitive attributes → flags preserved (`0x40`, `0x80`, `0xc0`);
@@ -175,9 +177,25 @@ re-verified once this harness runs**, then pinned by a test.
     (`mrt_make_rd_u64`, `mrt.c:376-414`); prefix length includes the 88 label + RD bits.
     The old sanity harness expected, via `bgpdump -m`, vpn4 `8.8.8.0/24` rd `100:100` →
     `8.8.8.0/112`, next hop `::ffff:172.22.0.0`. Production has `mastervpn4`/`mastervpn6`.
+    *Verified 2026-09-28* (`test_record_types.py`), static and received over BGP:
+
+    | RD | RFC 4364 bytes | written | bgpdump |
+    |---|---|---|---|
+    | `100:100` (type 0) | `0000006400000064` | `6400000064000000` | `100:100` |
+    | `10.0.0.2:7` (type 1) | `00010a0000020007` | `07000a0000020100` | `10.0.0.2:7` |
+    | `4200000000:9` (type 2) | `0002fa56ea000009` | `090000ea56fa0200` | `4200000000:9` |
+
+    The RD is BIRD's in-memory u64, little-endian on x86 (a big-endian host would write
+    something else again); no type is in RFC order, yet bgpdump prints all three right.
+    The label is always `0x000001` (label 0, bottom of stack): the peer's label 3
+    (implicit null) is not in the dump. Next hops are IPv4-mapped (`::ffff:…`) for vpn4;
+    a vpn6 peer's global + link-local next hop is dumped as the global. The same prefix
+    under two RDs is two records.
 12. **A wildcard table pattern skips VPN tables.** `mrt_next_table_` accepts only
     `NET_IP4`/`NET_IP6` tables when matching a pattern (`mrt.c:230-232`); a VPN table is
-    dumped only when named explicitly. **Test: `xfail(strict=True)`.**
+    dumped only when named explicitly. **Test: `xfail(strict=True)`.** *Confirmed
+    2026-09-28* (`test_record_types.py`): `mrt dump table "*"` wrote master4, master6, t4
+    and t6, not the two VPN tables. Production names every table, so it is not affected.
 13. **Suspected stale MP next hop.** `bgp_encode_next_hop` stores the next hop in
     `bws->mp_next_hop` (`attrs.c:306`) and nothing resets it between routes; one `bws`
     serves a whole dump step (`mrt.c:736`). An IPv6 entry that has attributes but no
@@ -189,7 +207,11 @@ re-verified once this harness runs**, then pinned by a test.
     `mit_dump_*` table, if those set attributes without a next hop (not checked).
 14. **VPN + ADD-PATH writes an unparseable record.** The subtype is always `RIB_GENERIC`,
     never `RIB_GENERIC_ADDPATH` (`mrt.c:640-643`), but the 4-byte path ID is still written
-    when `add_path` is set (`mrt.c:564-565`). **Test: `xfail(strict=True)`.**
+    when `add_path` is set (`mrt.c:564-565`). **Test: `xfail(strict=True)`.** *Confirmed
+    2026-09-28* with `protocol mrt { always add path on; }` on a vpn4 table: the strict
+    reader stops at "RIB record: 44 trailing bytes". bgpdump prints every route of the
+    file without a warning but with all attributes lost (empty path, INCOMPLETE, next hop
+    `255.255.255.255`). Production enables neither `always add path` nor ADD-PATH.
 15. **Dumps of more than 2048 routes pause and resume** (`s->max`, `mrt.c:738`). The fork
     patched the resume path to re-set `mp_reach` (`mrt.c:741-744`); nothing guards it.
     Needs a table of more than 2048 IPv6 routes.
@@ -223,7 +245,10 @@ The dev box's `/usr/local/etc/bird/bird.conf` is rendered by pipedream's
   them out of the dumped table.
 - **Families dumped:** the neighbor's `protocols`, default `ipv4` and `ipv6`. On the dev
   box the template's vpn4/vpn6/ipv4-mpls/ipv6-mpls channels fill `master*` tables that no
-  `protocol mrt` dumps.
+  `protocol mrt` dumps. A neighbor whose `protocols` include `vpn4`/`vpn6` gets its own
+  `vpn4 table bgp_session_<ip>_vpn4`, a `vpn4 mpls` channel bound to it (overriding the
+  template's `mastervpn4`) and a `protocol mrt` for it; merged sessions route only
+  ipv4/ipv6 through the merged table.
 - **Mitigation dumps** (`_render_mit_mrt_block`): `protocol mrt mit_dump_<device>_<family>`
   of `dev_<family>_<device>`, period 900. Those tables hold static routes, so every entry
   uses the fake peer 0 (finding 19).
@@ -259,6 +284,15 @@ The dev box's `/usr/local/etc/bird/bird.conf` is rendered by pipedream's
     communities reads `1, 2, 4, 8, 32, 14`. RFC 4271 asks UPDATEs to be ordered (SHOULD);
     RFC 6396 says nothing, and bgpdump does not mind. Pinned in `test_attributes.py`.
 
+23. **bgpdump silently drops ADD-PATH records.** bgpdump 1.4.99.14 prints nothing for
+    `RIB_*_ADDPATH` records, well-formed ones included: no rows, no warning, even with
+    `-v`. Should BIRD ever write them (`always add path`, or routes from an ADD-PATH
+    session), analytics loses those routes without a trace. Pinned in `test_bgpdump.py`.
+24. **bgpdump fills in placeholders for missing attributes**: no NEXT_HOP / MP_REACH
+    prints as `255.255.255.255` (IPv4 and IPv6 entries alike), no ORIGIN as `INCOMPLETE`,
+    no LOCAL_PREF or MED as `0`, no AS_PATH as an empty field. So `255.255.255.255` in
+    analytics means "the dump had no next hop for this route". Pinned in `test_bgpdump.py`.
+
 Tier 1 (`test_attributes.py`) also verified findings 2, 3, 5 and 18 byte for byte: IPv6
 next hops in the truncated MP_REACH_NLRI, IPv4 ones in NEXT_HOP, every filter-set flag
 byte `0x00` (the MP_REACH one included) apart from the extended-length bit.
@@ -284,7 +318,7 @@ prints one); the tier 2 column is still planned.
 | IPV6_EXT_COMMUNITY | 25 | — | — | DEFBE-9172 is not merged into `2.0.4`: this build cannot produce it |
 | LARGE_COMMUNITY | 32 | ✅ incl. 32-bit fields | ✓ | |
 | prefix encoding | — | ✅ /0, /32, /128, /1, /9, /10, /17, /25, /33, no attributes | ✓ | |
-| VPN RIB_GENERIC | — | static vpn4/vpn6 routes | vpn4/vpn6 mpls sessions | (11), (14) |
+| VPN RIB_GENERIC | — | ✅ static vpn4/vpn6, 3 RD types, byte-exact | ✅ vpn4/vpn6 mpls session, prodconf | (11) verified; (12), (14) xfail |
 
 ### Known gaps
 
@@ -312,7 +346,7 @@ Agreed 2026-09-28.
    prefix, next hop, AS path and communities, in the reader and in `bgpdump -m`.
    Finding 17. If the suite had one test, it would be this one.
 3. **Tier 1 attributes.** *Done.* Findings 2–5, 18.
-4. **VPN RIB_GENERIC.** Findings 11, 12, 14.
+4. **VPN RIB_GENERIC.** *Done.* Findings 11, 12, 14.
 5. **Tier 2 attributes over BGP**, flags and the BGP4MP cross-check.
 6. **Dump mechanics and edge cases.** Findings 13, 15, 16.
 7. **Later phases** (unchanged in intent):

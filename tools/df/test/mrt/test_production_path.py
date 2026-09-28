@@ -2,10 +2,7 @@
 Phase 2: the production path, end to end.
 
 The DUT config is what pipedream renders for analytics collection sessions, with lab
-addresses: the `bgp_peer` template (pipedream lib/deepy/bird/config.py:113) and the
-session, pipe and `protocol mrt` blocks of
-lib/deepy/bird/manager/bird_conf_renderer.py (_render_analytics_block,
-_render_analytics_mrt). Two peers, both AS 200 as on the dev box, cover the two shapes
+addresses (prodconf.py). Two peers, both AS 200 as on the dev box, cover the two shapes
 the renderer produces:
 
   peer_a, merged session: the ipv4/ipv6 channels import into merged_session_<peer>_*,
@@ -14,8 +11,6 @@ the renderer produces:
   peer_b, analytics session: the channels import straight into bgp_session_<peer>_*.
 
 Dumps come from the periodic `protocol mrt` timer, as in production, not from the CLI.
-The only lines the renderer does not produce are the log file and
-`debug protocols { events }`, which lets the test see when a periodic dump is complete.
 """
 
 import ipaddress
@@ -28,13 +23,13 @@ import pytest
 import bgpdump
 import birdlab
 import mrt_reader as m
+import prodconf
+from prodconf import analytics_table, merged_table, session_name
 
 ip = ipaddress.ip_address
 net = ipaddress.ip_network
 
-LOCAL_AS = 2500
 PEER_AS = 200
-DEVICE_ID = 56000
 MRT_PERIOD = 2          # production: 3900 s
 
 
@@ -73,100 +68,13 @@ PEERS = [
 # Mitigation statics in the merged session's device tables: never in a dump.
 MITIGATIONS = {"ipv4": "192.0.2.0/24", "ipv6": "2001:db8:dead::/48"}
 
-BGP_PEER_TEMPLATE = """
-template bgp bgp_peer {
-    debug all;
-    mrtdump all;
-    local as myas;
-    ipv4 { import all; extended next hop on; export none; };
-    ipv6 { import all; extended next hop on; export none; };
-    vpn4 mpls { import all; export none; extended next hop on; table mastervpn4; };
-    vpn6 mpls { import all; export none; extended next hop on; table mastervpn6; };
-    ipv4 mpls { import all; export none; extended next hop on; table masteripv4mpls; };
-    ipv6 mpls { import all; export none; extended next hop on; table masteripv6mpls; };
-    multihop;
-    graceful restart on;
-    long lived graceful restart on;
-    enable as4 on;
-    enable extended messages off;
-    capabilities on;
-    interpret communities off;
-    deterministic med on;
-}
-"""
-
-
-def session_name(remote_ip) -> str:
-    return "session_" + str(remote_ip).replace(".", "_")
-
-
-def analytics_table(remote_ip, afi) -> str:
-    return f"bgp_{session_name(remote_ip)}_{afi}"
-
-
-def merged_table(remote_ip, afi) -> str:
-    return f"merged_{session_name(remote_ip)}_{afi}"
-
-
 def dump_file(dumpdir, remote_ip, afi):
-    return dumpdir / f"local_bgpdump.{PEER_AS}.{remote_ip}.{afi}.mrt"
+    return prodconf.dump_file(dumpdir, PEER_AS, remote_ip, afi)
 
 
-def render_dut(log, dumpdir, sessions) -> str:
-    """sessions: [(Peer, remote_ip, source_ip)]"""
-    out = [f'log "{log}" all;\ndebug protocols {{ events }};\n',
-           "router id 0.0.0.1;\ndefine myas = 0;\n\n"
-           "vpn4 table mastervpn4;\nvpn6 table mastervpn6;\n"
-           "ipv4 table masteripv4mpls;\nipv6 table masteripv6mpls;\n",
-           BGP_PEER_TEMPLATE]
-    for family in ("ipv4", "ipv6", "flow4", "flow6"):
-        out.append(f"{family} table dev_{family}_{DEVICE_ID};\n")
-    for afi, prefix in MITIGATIONS.items():
-        out.append(f"protocol static mit_{DEVICE_ID}_{afi} {{\n"
-                   f"    {afi} {{ table dev_{afi}_{DEVICE_ID}; }};\n"
-                   f"    route {prefix} blackhole;\n}}\n")
-
-    for peer, remote, source in sessions:
-        name = session_name(remote)
-        out.append("\n")
-        for afi in ("ipv4", "ipv6"):
-            out.append(f"{afi} table {analytics_table(remote, afi)};\n")
-        if peer.merged:
-            for afi in ("ipv4", "ipv6"):
-                out.append(f"{afi} table {merged_table(remote, afi)};\n")
-        out.append(f"\nprotocol bgp {name} from bgp_peer {{\n"
-                   f"    neighbor {remote} as {PEER_AS};\n")
-        for afi in ("ipv4", "ipv6"):
-            if peer.merged:
-                out.append(f"    {afi} {{ table {merged_table(remote, afi)}; "
-                           f"export where source = RTS_STATIC; next hop keep on; }};\n")
-            else:
-                out.append(f"    {afi} {{ table {analytics_table(remote, afi)}; }};\n")
-        if peer.merged:
-            for family in ("flow4", "flow6"):
-                out.append(f"    {family}  {{ table dev_{family}_{DEVICE_ID}; "
-                           f"import none; export all; extended next hop; }};\n")
-        out.append(f"    source address {source};\n"
-                   f"    local as {LOCAL_AS};\n"
-                   f"    allow local as {LOCAL_AS};\n}}\n")
-        if peer.merged:
-            for afi in ("ipv4", "ipv6"):
-                out.append(f"\nprotocol pipe mit_bridge_{DEVICE_ID}_{afi} {{\n"
-                           f"    table dev_{afi}_{DEVICE_ID};\n"
-                           f"    peer table {merged_table(remote, afi)};\n"
-                           f"    import none;\n    export all;\n}}\n"
-                           f"protocol pipe analytics_mrt_{name}_{afi} {{\n"
-                           f"    table {merged_table(remote, afi)};\n"
-                           f"    peer table {analytics_table(remote, afi)};\n"
-                           f"    import none;\n    export where source = RTS_BGP;\n}}\n")
-
-    for peer, remote, source in sessions:
-        for afi in ("ipv4", "ipv6"):
-            out.append(f"\nprotocol mrt {{\n"
-                       f"    table {analytics_table(remote, afi)};\n"
-                       f'    filename "{dump_file(dumpdir, remote, afi)}";\n'
-                       f"    period {MRT_PERIOD};\n}}\n")
-    return "".join(out)
+def sessions_for(links) -> List[prodconf.Session]:
+    return [prodconf.Session(links[p.role].ip4[p.role], links[p.role].ip4["dut"], PEER_AS,
+                             merged=p.merged) for p in PEERS]
 
 
 def render_peer(log, peer: Peer, local, remote) -> str:
@@ -197,7 +105,7 @@ filter export_dut {{
 
 protocol bgp dut {{
   local {local} as {PEER_AS};
-  neighbor {remote} as {LOCAL_AS};
+  neighbor {remote} as {prodconf.LOCAL_AS};
   connect delay time 1;
   connect retry time 2;
   ipv4 {{ import all; export filter export_dut; }};
@@ -249,12 +157,12 @@ def section_key(s: m.Section):
 def prod(lab, bird_bin, peer_bird_bin, tmp_path_factory) -> Prod:
     dumpdir = tmp_path_factory.mktemp("pipedream_tmp")
     links = {p.role: lab.link("dut", p.role) for p in PEERS}
-    sessions = [(p, links[p.role].ip4[p.role], links[p.role].ip4["dut"]) for p in PEERS]
 
     # MRT times are truncated to whole seconds, and a route can arrive within the second
     # the DUT started in: BIRD shortens its connect delay by up to 25% (RFC 4271 jitter).
     t0 = int(time.time())
-    dut = lab.bird("dut", render_dut(lab.log_path("dut"), dumpdir, sessions), bird_bin)
+    dut = lab.bird("dut", prodconf.render_dut(lab.log_path("dut"), dumpdir, sessions_for(links),
+                                              MRT_PERIOD, MITIGATIONS), bird_bin)
     for p in PEERS:
         link = links[p.role]
         lab.bird(p.role, render_peer(lab.log_path(p.role), p,
@@ -304,11 +212,8 @@ def test_peer_table(prod, peer, afi):
 
 
 def received_next_hops(dut, table, route) -> List[str]:
-    """The BGP.next_hop addresses the DUT stores for `route`, from `show route ... all`."""
-    for line in dut.cmd(f"show route {route.prefix} table {table} all"):
-        if line.strip().startswith("BGP.next_hop:"):
-            return line.split(":", 1)[1].split()
-    raise AssertionError(f"no BGP.next_hop for {route.prefix} in {table}")
+    """The BGP.next_hop addresses the DUT stores for `route`."""
+    return dut.route_attributes(table)[route.prefix]["BGP.next_hop"].split()
 
 
 @pytest.mark.parametrize("peer,afi", CASES, ids=CASE_IDS)

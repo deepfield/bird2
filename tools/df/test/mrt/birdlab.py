@@ -196,6 +196,29 @@ class Bird:
                 return int(m.group(1))
         raise BirdError(f"{self.name}: cannot count routes in {table}")
 
+    def route_attributes(self, table: str) -> Dict[str, Dict[str, str]]:
+        """
+        `show route table <t> all` as net -> {attribute: value}, e.g. 'BGP.next_hop'.
+        VPN nets are keyed '<rd> <prefix>'. Attribute lines start with a tab; lines
+        starting with spaces are further routes for the same net and are skipped.
+        """
+        out: Dict[str, Dict[str, str]] = {}
+        current = None
+        for line in self.cmd(f"show route table {table} all"):
+            if not line.strip() or line.startswith("Table "):
+                continue
+            if line.startswith("\t"):
+                if current and ":" in line:
+                    key, value = line.strip().split(":", 1)
+                    out[current][key] = value.strip()
+            elif line.startswith(" "):
+                current = None
+            else:
+                f = line.split()
+                current = f[0] if "/" in f[0] else f"{f[0]} {f[1]}"
+                out[current] = {}
+        return out
+
     def wait_routes(self, table: str, n: int, timeout: float = 30.0) -> None:
         wait_until(lambda: self.route_count(table) == n, timeout,
                    f"{self.name}: {n} routes in {table}", diagnostics=self.log_tail)
