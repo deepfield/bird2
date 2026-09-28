@@ -5,11 +5,14 @@ analytics. Every BGP path attribute in a dump must be byte-correct, value *and* 
 and so must the fork-specific parts: VPN `RIB_GENERIC` records, the MP_REACH next hop, and
 how dumps are written to disk.
 
-## Status: design only, nothing built
+## Status: phases 0 and 1 done (2026-09-28)
 
-Branch `2.0.4-mrt-dump-tests` (off `2.0.4`). An earlier container-based version of this
-suite (`compile-stack/`, 31 tests) is not available. Its design and findings are carried
-over below; its code is not, and the suite is rebuilt here to the decisions that follow.
+Branch `2.0.4-mrt-dump-tests` (off `2.0.4`). BIRD builds on the dev box
+(`install_prereq.sh`, `build_bird.sh`) and the harness runs: 54 tests in about 2 s,
+stable over repeated runs, namespaces cleaned up after each. Next: phase 2.
+
+An earlier container-based version of this suite (`compile-stack/`, 31 tests) is not
+available. Its design and findings are carried over below; its code is not.
 
 ## Decisions (2026-09-28)
 
@@ -41,12 +44,17 @@ The byte-level reader says what BIRD wrote; bgpdump says what analytics will see
 tools/df/test/mrt/
   PLAN.md                  this file
   README.md                build bird, run the suite
-  conftest.py              locate $BIRD / $PEER_BIRD, sudo check (skip if missing), fixtures
+  install_prereq.sh        apt packages for building bird and running the suite
+  build_bird.sh            build ./bird in the repo root with the production configure flags
+  pytest.ini
+  conftest.py              locate $BIRD / $PEER_BIRD / $BGPDUMP, sudo check (skip if missing), fixtures
   netns.py                 create/tear down namespaces and veth links, stale-run cleanup
-  birdlab.py               start/stop bird in a namespace, control-socket client, config renderers
+  birdlab.py               start/stop bird in a namespace, control-socket client, config prolog
   mrt_reader.py            strict RFC 6396 TABLE_DUMP_V2 reader, unknown attributes kept raw
-  bgpdump.py               run `bgpdump -m`, split its pipe-separated fields
+  bgpdump.py               run `bgpdump -m`, split its pipe-separated fields, collect its warnings
   test_mrt_reader.py       reader unit tests against hand-built bytes (no bird)
+  test_bgpdump.py          wrapper tests: line parsing, and problems the real bgpdump only logs
+  test_harness.py          smoke: dumps from a daemon in a namespace, a BGP session over veth
   test_production_path.py  eBGP → bgp_session table → pipe → merged table → dump
   test_attributes.py       tier 1: filter-set attributes, no peer
   test_attributes_bgp.py   tier 2: attributes received over BGP
@@ -116,12 +124,13 @@ re-verified once this harness runs**, then pinned by a test.
 
 1. **`mrt dump table … to …` needs no `protocol mrt` instance.** The CLI command is
    registered by the module (`proto/mrt/config.Y:53`); `mrt_dump_cmd` only wants a table
-   and a filename.
+   and a filename. *Re-verified: every harness test dumps this way.*
 2. **The RIB-dump MP_REACH_NLRI is truncated.** RFC 6396 4.3.4 keeps only the next hop
    length and address (no AFI/SAFI, no NLRI), and `mrt.c:588-617` writes exactly that
    (`flags, 14, len=17, 16, <16 bytes>`). The reader must decode RIB next hops with the
    table-dump layout, not the wire layout (the old reader returned `None` for every IPv6
-   route until `attr_next_hop`/`parse_mp_reach` took `table_dump=`).
+   route until `attr_next_hop`/`parse_mp_reach` took `table_dump=`). *Re-verified: the
+   strict reader decodes IPv6 dumps only with the table-dump layout.*
 3. **IPv4 RIB entries use the legacy NEXT_HOP attribute**, because `mrt.c` sets
    `bws->mp_reach = !s->ipv4`.
 4. **An IPv6 next hop on an IPv4 route dumps with no next hop at all**: not as MP_REACH,
@@ -185,6 +194,21 @@ re-verified once this harness runs**, then pinned by a test.
     `alen += 1 + lh` (`mrt.c:616`) would still count one unwritten byte (probably
     unreachable: BIRD stores next hops as `ip_addr`).
 
+## Found while building the harness (2026-09-28, verified)
+
+19. **Peer 0, the stand-in for non-BGP routes, is an IPv6 peer `::`.** BIRD writes it
+    with `IPA_NONE` (`mrt.c:350`), which in BIRD 2 is the IPv6 zero address: peer type
+    `0x03` (AS4 + IPv6), BGP ID `0.0.0.0`, AS 0. bgpdump prints such entries as peer `::`
+    AS 0. Pinned in `test_harness.py`. No effect on production, whose merged tables only
+    hold BGP routes.
+20. **bgpdump never fails.** On a malformed file it exits 0, logs `[warn]`/`[error]`
+    (to stderr with `-v`, otherwise syslog) and may drop the broken record without a
+    trace: a file cut 3 bytes short lost its last route. So the consumer check asserts
+    bgpdump logged nothing, and the strict reader remains the check for encoding errors.
+    Also: a missing LOCAL_PREF or MED prints as `0`, indistinguishable from a real 0.
+    The line format is in `bgpdump.py`; VPN rows carry an extra RD field, and both RD
+    types seen so far (`100:100`, `10.0.0.2:7`) print correctly.
+
 ## Coverage (planned)
 
 | attribute | code | tier 1 | tier 2 | notes |
@@ -218,9 +242,9 @@ re-verified once this harness runs**, then pinned by a test.
 
 Agreed 2026-09-28.
 
-0. **Build.** Install `bison`, `flex`, `libreadline-dev` on the dev box; build BIRD in the
+0. **Build.** *Done.* Install `bison`, `flex`, `libreadline-dev` on the dev box; build BIRD in the
    tree (`-fcommon` with modern GCC, as `test_draft00/build.sh` does).
-1. **Harness.** `netns.py`, `birdlab.py`, `mrt_reader.py` + `test_mrt_reader.py`,
+1. **Harness.** *Done.* `netns.py`, `birdlab.py`, `mrt_reader.py` + `test_mrt_reader.py`,
    `bgpdump.py`.
 2. **Production path.** A BIRD peer announces over eBGP into a `bgp_session` table, a
    pipe copies it into a `merged` table, and that table is dumped. Asserts peer index,
