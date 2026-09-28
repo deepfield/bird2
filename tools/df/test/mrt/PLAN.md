@@ -11,6 +11,11 @@ Branch `2.0.4-mrt-dump-tests` (off `2.0.4`). BIRD builds on the dev box
 (`install_prereq.sh`, `build_bird.sh`), the harness runs, and the production-path test
 passes: 72 tests in about 7 s, namespaces cleaned up after each run. Next: phase 3.
 
+Breakage checks (2026-09-28, BIRD rebuilt in a throwaway worktree, peers on the normal
+build): forcing the RIB entry's peer index to 0 (`mrt.c:555`) fails the 8 peer-index
+checks in `test_production_path.py`, reader and bgpdump alike; always taking the second
+address of a 32-byte next hop (`mrt.c:603`) fails the 4 IPv6 next hop checks.
+
 An earlier container-based version of this suite (`compile-stack/`, 31 tests) is not
 available. Its design and findings are carried over below; its code is not.
 
@@ -233,6 +238,14 @@ The dev box's `/usr/local/etc/bird/bird.conf` is rendered by pipedream's
     Also: a missing LOCAL_PREF or MED prints as `0`, indistinguishable from a real 0.
     The line format is in `bgpdump.py`; VPN rows carry an extra RD field, and both RD
     types seen so far (`100:100`, `10.0.0.2:7`) print correctly.
+21. **A peer started too early sends no link-local next hop.** BIRD takes its IPv6
+    link-local address once, when the session starts (`bgp.c:510`, `:1208`), and ignores
+    tentative addresses (`netlink.c:1003`); the kernel keeps a new veth's link-local
+    tentative until carrier, DAD or not. A daemon that reads its interfaces in that window
+    brings BGP up with a 16-byte next hop (logging "Missing link-local address"), and
+    the 32-byte path in `mrt.c` goes untested. `netns.Link` therefore waits for a usable
+    link-local on both ends, and `test_production_path.py` asserts the DUT received two
+    next hop addresses. Lab-only: production interfaces are long up.
 
 ## Coverage (planned)
 

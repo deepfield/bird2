@@ -303,6 +303,14 @@ def test_peer_table(prod, peer, afi):
         (2, ip(q.router_id), prod.remote(q), PEER_AS) for q in PEERS)
 
 
+def received_next_hops(dut, table, route) -> List[str]:
+    """The BGP.next_hop addresses the DUT stores for `route`, from `show route ... all`."""
+    for line in dut.cmd(f"show route {route.prefix} table {table} all"):
+        if line.strip().startswith("BGP.next_hop:"):
+            return line.split(":", 1)[1].split()
+    raise AssertionError(f"no BGP.next_hop for {route.prefix} in {table}")
+
+
 @pytest.mark.parametrize("peer,afi", CASES, ids=CASE_IDS)
 def test_routes(prod, peer, afi):
     section = prod.section(peer, afi)
@@ -327,6 +335,7 @@ def test_routes(prod, peer, afi):
             assert e.next_hops() == [link.ip4[peer.role]]
         else:
             # Received as global + link-local (direct session); the dump keeps the global.
+            assert len(received_next_hops(prod.dut, section.peer_table.view_name, route)) == 2
             assert e.attr(m.NEXT_HOP) is None
             assert e.next_hops() == [link.ip6[peer.role]]
 

@@ -14,6 +14,7 @@ import ipaddress
 import os
 import re
 import subprocess
+import time
 from typing import Dict, List, Optional
 
 PREFIX = "mrt-"
@@ -137,8 +138,28 @@ class Link:
             ns.ip("addr", "add", f"{self.ip4[ns.role]}/24", "dev", ifname)
             ns.ip("-6", "addr", "add", f"{self.ip6[ns.role]}/64", "dev", ifname, "nodad")
             ns.ip("link", "set", ifname, "up")
+        self._wait_link_local()
         a.links[b.role] = self
         b.links[a.role] = self
+
+    def _wait_link_local(self, timeout: float = 5.0) -> None:
+        """
+        Wait until both ends have a usable link-local address. The kernel keeps it
+        tentative until the veth has carrier, even without DAD, and BIRD ignores tentative
+        addresses: a daemon started too early brings BGP up without a link-local address
+        and sends a 16-byte IPv6 next hop instead of global + link-local.
+        """
+        deadline = time.monotonic() + timeout
+        for ns in (self.a, self.b):
+            ifname = self.ifname[ns.role]
+            while True:
+                ll = ns.ip("-6", "addr", "show", "dev", ifname, "scope", "link").stdout
+                tentative = ns.ip("-6", "addr", "show", "dev", ifname, "tentative").stdout
+                if "fe80" in ll and not tentative.strip():
+                    break
+                if time.monotonic() > deadline:
+                    raise NetnsError(f"{ns.name} {ifname}: no usable link-local address after {timeout}s")
+                time.sleep(0.02)
 
     def peer_of(self, role: str) -> str:
         return self.b.role if role == self.a.role else self.a.role
