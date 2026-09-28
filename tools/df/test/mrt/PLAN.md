@@ -23,12 +23,17 @@ over below; its code is not, and the suite is rebuilt here to the decisions that
 | peer binary | same as the binary under test by default; `PEER_BIRD=` overrides it with a known-good build |
 | dumps | forced with `mrt dump table <t> to "<f>"`; tests never wait for `period` |
 | configs | minimal, purpose-built, rendered by `birdlab.py` (the real `deepy.bird.config` renderer is phase A) |
+| consumer check | every dump is also run through `bgpdump -m` and the fields analytics reads are asserted; skipped if bgpdump is missing, `BGPDUMP=` overrides the path |
 | known bugs | findings 4, 12, 13, 14: the test asserts the correct behaviour and is marked `xfail(strict=True)` citing the finding, so a fix flips it and forces the marker off; other findings are pinned as current behaviour |
 
 Why the peer binary is configurable: when the peers run the binary under test, one change
 can break BGP encode and decode in matching ways, and the dump still looks right. Pointing
 `PEER_BIRD` at a known-good build (on the dev box: `/pipedream/local/venv/bird2/sbin/bird`,
 2.0.4.12.df) rules that out.
+
+The consumer check uses the product's own parser: on the dev box `/usr/local/sbin/bgpdump`
+is bgpdump 1.4.99.14 from the `deepfield-pipedream` package, built with RIB_GENERIC support.
+The byte-level reader says what BIRD wrote; bgpdump says what analytics will see.
 
 ## Layout
 
@@ -40,11 +45,13 @@ tools/df/test/mrt/
   netns.py                 create/tear down namespaces and veth links, stale-run cleanup
   birdlab.py               start/stop bird in a namespace, control-socket client, config renderers
   mrt_reader.py            strict RFC 6396 TABLE_DUMP_V2 reader, unknown attributes kept raw
+  bgpdump.py               run `bgpdump -m`, split its pipe-separated fields
   test_mrt_reader.py       reader unit tests against hand-built bytes (no bird)
+  test_production_path.py  eBGP → bgp_session table → pipe → merged table → dump
   test_attributes.py       tier 1: filter-set attributes, no peer
   test_attributes_bgp.py   tier 2: attributes received over BGP
   test_record_types.py     VPN RIB_GENERIC, prefix encodings
-  test_dump_mechanics.py   >2048 routes, append mode, table selection, pipes
+  test_dump_mechanics.py   >2048 routes, append mode, table selection, stale next hop
 ```
 
 ## Harness
@@ -209,15 +216,21 @@ re-verified once this harness runs**, then pinned by a test.
 
 ## Phases
 
-Draft order, to be settled when discussing scope.
+Agreed 2026-09-28.
 
 0. **Build.** Install `bison`, `flex`, `libreadline-dev` on the dev box; build BIRD in the
    tree (`-fcommon` with modern GCC, as `test_draft00/build.sh` does).
-1. **Harness.** `netns.py`, `birdlab.py`, `mrt_reader.py` + `test_mrt_reader.py`.
-2. **Tier 1 attributes.**
-3. **Tier 2 attributes over BGP.**
-4. **Record types and dump mechanics.** Findings 11–17.
-5. **Later phases** (unchanged in intent):
+1. **Harness.** `netns.py`, `birdlab.py`, `mrt_reader.py` + `test_mrt_reader.py`,
+   `bgpdump.py`.
+2. **Production path.** A BIRD peer announces over eBGP into a `bgp_session` table, a
+   pipe copies it into a `merged` table, and that table is dumped. Asserts peer index,
+   prefix, next hop, AS path and communities, in the reader and in `bgpdump -m`.
+   Finding 17. If the suite had one test, it would be this one.
+3. **Tier 1 attributes.** Findings 2–5, 18.
+4. **VPN RIB_GENERIC.** Findings 11, 12, 14.
+5. **Tier 2 attributes over BGP**, flags and the BGP4MP cross-check.
+6. **Dump mechanics and edge cases.** Findings 13, 15, 16.
+7. **Later phases** (unchanged in intent):
    - **A. Table topology / isolation.** Route injected by peer A lands in A's table and
      only A's; each protocol (`ipv4`/`ipv6`/`vpn4`/`vpn6`/`ipv4-mpls`/`ipv6-mpls`) dumps to
      its own file with the right AFI/SAFI; neighbor add/remove and reconfigure cross-wire
