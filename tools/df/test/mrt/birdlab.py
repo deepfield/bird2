@@ -8,6 +8,7 @@ Unix sockets are not namespaced: the tests talk to every control socket from the
 """
 
 import grp
+import ipaddress
 import os
 import pwd
 import re
@@ -17,6 +18,10 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
 import netns
+
+# Peer 0 of every PEER_INDEX_TABLE stands in for non-BGP routes. BIRD writes it with
+# IPA_NONE, the IPv6 zero address in BIRD 2: (peer type, BGP ID, IP, AS) is below.
+MRT_FAKE_PEER = (3, ipaddress.IPv4Address("0.0.0.0"), ipaddress.IPv6Address("::"), 0)
 
 
 class BirdError(RuntimeError):
@@ -162,6 +167,15 @@ class Bird:
 
     # -- queries ---------------------------------------------------------------
 
+    def protocols(self) -> Dict[str, List[str]]:
+        """`show protocols` as name -> [proto, table, state, since, info...]."""
+        out = {}
+        for line in self.cmd("show protocols"):
+            fields = line.split()
+            if len(fields) >= 5 and fields[0] != "Name":
+                out[fields[0]] = fields[1:]
+        return out
+
     def protocol_state(self, proto: str) -> str:
         """The Info column of `show protocols <proto>`, e.g. 'Established'."""
         for line in self.cmd(f"show protocols {proto}"):
@@ -194,6 +208,45 @@ class Bird:
         """
         self.cmd(f'mrt dump table {table} to "{path}"')
         return path
+
+    # -- periodic dumps (protocol mrt) ------------------------------------------
+    #
+    # These rely on `debug protocols { events }` in the config: an MRT protocol then logs
+    # "<name>: RIB table dump started" and "... done" around every periodic dump.
+
+    _DUMP_EVENT_RE = re.compile(r"<TRACE> (\S+): RIB table dump (started|done)$")
+
+    def mrt_protocols(self) -> List[str]:
+        return sorted(name for name, fields in self.protocols().items() if fields[0] == "MRT")
+
+    def mrt_dump_events(self) -> Dict[str, Dict[str, int]]:
+        """Per MRT protocol, how many periodic dumps have started and finished so far."""
+        counts = {name: {"started": 0, "done": 0} for name in self.mrt_protocols()}
+        for line in self.log.read_text(errors="replace").splitlines():
+            m = self._DUMP_EVENT_RE.search(line)
+            if m and m.group(1) in counts:
+                counts[m.group(1)][m.group(2)] += 1
+        return counts
+
+    def wait_periodic_dumps(self, since: Dict[str, Dict[str, int]],
+                            timeout: float = 30.0) -> Dict[str, Dict[str, int]]:
+        """
+        Wait until every MRT protocol has finished a dump that started after the snapshot
+        `since` (from mrt_dump_events()), and return the new counts. Dumps of one protocol
+        never overlap, so its dump number since[p]["started"] (0-based) is the first one
+        that started after the snapshot.
+        """
+        def ready():
+            now = self.mrt_dump_events()
+            return now if all(now[p]["done"] > since[p]["started"] for p in since) else None
+        return wait_until(ready, timeout, f"{self.name}: a periodic MRT dump of every table",
+                          diagnostics=self.log_tail)
+
+    def disable(self, proto: str, timeout: float = 30.0) -> None:
+        """Disable `proto` and wait until it is down (an MRT dump in progress finishes first)."""
+        self.cmd(f"disable {proto}")
+        wait_until(lambda: self.protocols()[proto][2] == "down", timeout,
+                   f"{self.name}: {proto} to go down", diagnostics=self.log_tail)
 
 
 class Lab:

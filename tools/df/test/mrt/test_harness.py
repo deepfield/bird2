@@ -14,9 +14,7 @@ import mrt_reader as m
 
 ip = ipaddress.ip_address
 
-# Peer 0 stands in for non-BGP routes. BIRD writes it with IPA_NONE, which in BIRD 2 is
-# the IPv6 zero address, so it is an AS4 + IPv6 peer with address ::.
-FAKE_PEER = (3, ip("0.0.0.0"), ip("::"), 0)
+FAKE_PEER = birdlab.MRT_FAKE_PEER
 
 
 def dut_static_config(log):

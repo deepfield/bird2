@@ -5,11 +5,11 @@ analytics. Every BGP path attribute in a dump must be byte-correct, value *and* 
 and so must the fork-specific parts: VPN `RIB_GENERIC` records, the MP_REACH next hop, and
 how dumps are written to disk.
 
-## Status: phases 0 and 1 done (2026-09-28)
+## Status: phases 0–2 done (2026-09-28)
 
 Branch `2.0.4-mrt-dump-tests` (off `2.0.4`). BIRD builds on the dev box
-(`install_prereq.sh`, `build_bird.sh`) and the harness runs: 54 tests in about 2 s,
-stable over repeated runs, namespaces cleaned up after each. Next: phase 2.
+(`install_prereq.sh`, `build_bird.sh`), the harness runs, and the production-path test
+passes: 72 tests in about 7 s, namespaces cleaned up after each run. Next: phase 3.
 
 An earlier container-based version of this suite (`compile-stack/`, 31 tests) is not
 available. Its design and findings are carried over below; its code is not.
@@ -55,7 +55,7 @@ tools/df/test/mrt/
   test_mrt_reader.py       reader unit tests against hand-built bytes (no bird)
   test_bgpdump.py          wrapper tests: line parsing, and problems the real bgpdump only logs
   test_harness.py          smoke: dumps from a daemon in a namespace, a BGP session over veth
-  test_production_path.py  eBGP → bgp_session table → pipe → merged table → dump
+  test_production_path.py  pipedream's rendered config, merged + analytics sessions, periodic dumps
   test_attributes.py       tier 1: filter-set attributes, no peer
   test_attributes_bgp.py   tier 2: attributes received over BGP
   test_record_types.py     VPN RIB_GENERIC, prefix encodings
@@ -185,14 +185,39 @@ re-verified once this harness runs**, then pinned by a test.
     `%N`/strftime expansion was removed. Repeated dumps, and multi-table patterns, append
     to one file, each section with its own PEER_INDEX_TABLE and a sequence number
     restarting at 0. The `strcpy` into a `PATH_MAX` buffer is unbounded.
-17. **Production dumps pipe-fed tables.** The `merged_session_*` tables are filled by
-    `analytics_mrt_session_*` pipes. The peer index is looked up from the route's source
-    protocol (`mrt.c:549-555`), so it should still resolve to the BGP peer, not to
-    peer 0. Pin it.
+17. **Production dumps pipe-fed tables.** On a merged session the BGP channel imports
+    into `merged_session_*`, and the `analytics_mrt_session_*` pipe copies the RTS_BGP
+    routes on into `bgp_session_*`, the dumped table. The peer index is looked up from
+    the route's source protocol (`mrt.c:549-555`), so it should still resolve to the BGP
+    peer, not to peer 0. *Verified 2026-09-28 (`test_production_path.py`): it does.*
 18. **MP_REACH flags in the RIB dump are copied from the NEXT_HOP eattr** (`mrt.c:608`),
     not set to the RFC's optional `0x80`. If `mp_next_hop` were neither 16 nor 32 bytes,
     `alen += 1 + lh` (`mrt.c:616`) would still count one unwritten byte (probably
     unreachable: BIRD stores next hops as `ip_addr`).
+
+## How production dumps (read 2026-09-28)
+
+The dev box's `/usr/local/etc/bird/bird.conf` is rendered by pipedream's
+`lib/deepy/bird/manager/bird_conf_renderer.py`, with the `bgp_peer` template from
+`lib/deepy/bird/config.py:113`.
+
+- **One `protocol mrt` per session and family** (`_render_analytics_mrt`):
+  `table bgp_session_<ip>_<afi>`, `filename "/pipedream/tmp/local_bgpdump.<as>.<ip>.<afi>.mrt"`,
+  `period 3900`. Nothing uses `birdc mrt dump`.
+- **Two session shapes.** An *analytics* session binds `bgp_session_*` directly. A
+  *merged* session (analytics + mitigation announcer on one peer) binds
+  `merged_session_*`, which a `mit_bridge_*` pipe also fills with the device's
+  mitigation statics; the `analytics_mrt_*` pipe (`export where source = RTS_BGP`) keeps
+  them out of the dumped table.
+- **Families dumped:** the neighbor's `protocols`, default `ipv4` and `ipv6`. On the dev
+  box the template's vpn4/vpn6/ipv4-mpls/ipv6-mpls channels fill `master*` tables that no
+  `protocol mrt` dumps.
+- **Mitigation dumps** (`_render_mit_mrt_block`): `protocol mrt mit_dump_<device>_<family>`
+  of `dev_<family>_<device>`, period 900. Those tables hold static routes, so every entry
+  uses the fake peer 0 (finding 19).
+- **Routes are unreachable in the tables.** With the template's `multihop`, next hops
+  resolve recursively and there is nothing to resolve them against; the routes stay in
+  the table as unreachable and are dumped all the same.
 
 ## Found while building the harness (2026-09-28, verified)
 
@@ -220,7 +245,7 @@ re-verified once this harness runs**, then pinned by a test.
 | LOCAL_PREF | 5 | ✓ | iBGP kept / eBGP defaulted | |
 | COMMUNITY | 8 | + extended-length flag at 70 communities | ✓ | |
 | ORIGINATOR_ID / CLUSTER_LIST | 9 / 10 | ✓ | — | |
-| MP_REACH_NLRI | 14 | truncated form (2), stale next hop (13) | 16- and 32-byte next hops | |
+| MP_REACH_NLRI | 14 | truncated form (2), stale next hop (13) | 16- and 32-byte next hops | 32-byte received, global kept: `test_production_path.py` |
 | EXT_COMMUNITY | 16 | rt + ro | ✓ | |
 | IPV6_EXT_COMMUNITY | 25 | v4 and v6 routes, byte-exact | ✓ BIRD announcer | DEFBE-9172; redirect subtype `0x0c` |
 | LARGE_COMMUNITY | 32 | incl. 32-bit fields | ✓ | |
@@ -246,7 +271,7 @@ Agreed 2026-09-28.
    tree (`-fcommon` with modern GCC, as `test_draft00/build.sh` does).
 1. **Harness.** *Done.* `netns.py`, `birdlab.py`, `mrt_reader.py` + `test_mrt_reader.py`,
    `bgpdump.py`.
-2. **Production path.** A BIRD peer announces over eBGP into a `bgp_session` table, a
+2. **Production path.** *Done.* A BIRD peer announces over eBGP into a `bgp_session` table, a
    pipe copies it into a `merged` table, and that table is dumped. Asserts peer index,
    prefix, next hop, AS path and communities, in the reader and in `bgpdump -m`.
    Finding 17. If the suite had one test, it would be this one.
