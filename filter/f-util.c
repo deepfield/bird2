@@ -190,6 +190,9 @@ ca_lookup(pool *p, const char *name, int f_type)
     case T_LCLIST:
       ea_type = EAF_TYPE_LC_SET;
       break;
+    case T_IP6ECLIST:
+      ea_type = EAF_TYPE_IP6_EC_SET;
+      break;
     default:
       cf_error("Custom route attribute of unsupported type");
   }

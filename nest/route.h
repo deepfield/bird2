@@ -504,6 +504,7 @@ const char *ea_custom_name(uint ea);
 #define EAF_TYPE_INT_SET 0x0a		/* Set of u32's (e.g., a community list) */
 #define EAF_TYPE_EC_SET 0x0e		/* Set of pairs of u32's - ext. community list */
 #define EAF_TYPE_LC_SET 0x12		/* Set of triplets of u32's - large community list */
+#define EAF_TYPE_IP6_EC_SET 0x14	/* Set of 5-tuples of u32's - IPv6 ext. community list (RFC 5701) */
 #define EAF_TYPE_UNDEF 0x1f		/* `force undefined' entry */
 #define EAF_EMBEDDED 0x01		/* Data stored in eattr.u.data (part of type spec) */
 #define EAF_VAR_LENGTH 0x02		/* Attribute length is variable (part of type spec) */

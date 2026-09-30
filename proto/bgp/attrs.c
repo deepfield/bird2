@@ -624,6 +624,26 @@ bgp_decode_large_community(struct bgp_parse_state *s, uint code UNUSED, uint fla
 }
 
 static void
+bgp_export_ipv6_ext_community(struct bgp_export_state *s, eattr *a)
+{
+  if (a->u.ptr->length == 0)
+    UNSET(a);
+
+  a->u.ptr = ip6ec_set_sort(s->pool, a->u.ptr);
+}
+
+static void
+bgp_decode_ipv6_ext_community(struct bgp_parse_state *s, uint code UNUSED, uint flags, byte *data, uint len, ea_list **to)
+{
+  if (!len || (len % IP6_ECOMM_LENGTH))
+    WITHDRAW(BAD_LENGTH, "IPV6_EXT_COMMUNITY", len);
+
+  struct adata *ad = lp_alloc_adata(s->pool, len);
+  get_u32s(data, (u32 *) ad->data, len / 4);
+  bgp_set_attr_ptr(to, s->pool, BA_IPV6_EXT_COMMUNITY, flags, ad);
+}
+
+static void
 bgp_export_mpls_label_stack(struct bgp_export_state *s, eattr *a)
 {
   net_addr *n = s->route->net->n.addr;
@@ -826,6 +846,14 @@ static const struct bgp_attr_desc bgp_attr_table[] = {
     .export = bgp_export_large_community,
     .encode = bgp_encode_u32s,
     .decode = bgp_decode_large_community,
+  },
+  [BA_IPV6_EXT_COMMUNITY] = {
+    .name = "ipv6_ext_community",
+    .type = EAF_TYPE_IP6_EC_SET,
+    .flags = BAF_OPTIONAL | BAF_TRANSITIVE,
+    .export = bgp_export_ipv6_ext_community,
+    .encode = bgp_encode_u32s,
+    .decode = bgp_decode_ipv6_ext_community,
   },
   [BA_MPLS_LABEL_STACK] = {
     .name = "mpls_label_stack",

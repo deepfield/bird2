@@ -35,6 +35,7 @@ f_valid_set_type(int type)
   case T_IP:
   case T_EC:
   case T_LC:
+  case T_IP6EC:
   case T_RD:
     return 1;
 
@@ -172,6 +173,9 @@ f_generate_empty(struct f_dynamic_attr dyn)
       break;
     case EAF_TYPE_LC_SET:
       e->aux = T_LCLIST;
+      break;
+    case EAF_TYPE_IP6_EC_SET:
+      e->aux = T_IP6ECLIST;
       break;
     default:
       cf_error("Can't empty that attribute");
@@ -404,8 +408,8 @@ CF_DECLS
 
 CF_KEYWORDS(FUNCTION, PRINT, PRINTN, UNSET, RETURN,
 	ACCEPT, REJECT, ERROR, QUITBIRD,
-	INT, BOOL, IP, TYPE, PREFIX, RD, PAIR, QUAD, EC, LC,
-	SET, STRING, BGPMASK, BGPPATH, CLIST, ECLIST, LCLIST,
+	INT, BOOL, IP, TYPE, PREFIX, RD, PAIR, QUAD, EC, LC, IP6EC,
+	SET, STRING, BGPMASK, BGPPATH, CLIST, ECLIST, LCLIST, IP6ECLIST,
 	IF, THEN, ELSE, CASE,
 	TRUE, FALSE, RT, RO, UNKNOWN, GENERIC,
 	FROM, GW, NET, MASK, PROTO, SOURCE, SCOPE, DEST, IFNAME, IFINDEX,
@@ -485,12 +489,14 @@ type:
  | QUAD { $$ = T_QUAD; }
  | EC { $$ = T_EC; }
  | LC { $$ = T_LC; }
+ | IP6EC { $$ = T_IP6EC; }
  | STRING { $$ = T_STRING; }
  | BGPMASK { $$ = T_PATH_MASK; }
  | BGPPATH { $$ = T_PATH; }
  | CLIST { $$ = T_CLIST; }
  | ECLIST { $$ = T_ECLIST; }
  | LCLIST { $$ = T_LCLIST; }
+ | IP6ECLIST { $$ = T_IP6ECLIST; }
  | type SET {
 	switch ($1) {
 	  case T_INT:
@@ -498,6 +504,7 @@ type:
 	  case T_QUAD:
 	  case T_EC:
 	  case T_LC:
+	  case T_IP6EC:
 	  case T_RD:
 	  case T_IP:
 	       $$ = T_SET;
@@ -808,6 +815,12 @@ constructor:
    '(' term ',' term ')' { $$ = f_generate_dpair($2, $4); }
  | '(' ec_kind ',' term ',' term ')' { $$ = f_generate_ec($2, $4, $6); }
  | '(' term ',' term ',' term ')' { $$ = f_generate_lc($2, $4, $6); }
+ | '(' IP6EC ',' term ',' term ',' term ')' {
+     $$ = f_new_inst(FI_IP6EC_CONSTRUCT);
+     $$->a1.p = $4;
+     $$->a2.p = $6;
+     $$->a3.p = $8;
+   }
  | bgp_path { $$ = f_generate_path_mask($1); }
  ;
 

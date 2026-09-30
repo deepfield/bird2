@@ -172,30 +172,62 @@ static inline int lc_match(const u32 *l, int i, lcomm v)
 static inline u32 *lc_copy(u32 *dst, const u32 *src)
 { memcpy(dst, src, LCOMM_LENGTH); return dst + 3; }
 
+/* RFC 5701 IPv6 Address Specific Extended Community, stored as 5 u32 words in
+ * on-the-wire (big-endian) order: byte 0 = type, byte 1 = subtype, bytes 2-17 =
+ * IPv6 global administrator, bytes 18-19 = local administrator. */
+typedef struct ip6ec {
+  u32 v[5];
+} ip6ec;
+
+#define IP6_ECOMM_LENGTH 20
+
+static inline int ip6ec_set_get_size(struct adata *list)
+{ return list->length / IP6_ECOMM_LENGTH; }
+
+static inline ip6ec ip6ec_get(const u32 *l, int i)
+{ return (ip6ec) {{ l[i], l[i+1], l[i+2], l[i+3], l[i+4] }}; }
+
+static inline void ip6ec_put(u32 *l, ip6ec v)
+{ l[0] = v.v[0]; l[1] = v.v[1]; l[2] = v.v[2]; l[3] = v.v[3]; l[4] = v.v[4]; }
+
+static inline int ip6ec_match(const u32 *l, int i, ip6ec v)
+{ return (l[i] == v.v[0] && l[i+1] == v.v[1] && l[i+2] == v.v[2] &&
+	  l[i+3] == v.v[3] && l[i+4] == v.v[4]); }
+
+static inline u32 *ip6ec_copy(u32 *dst, const u32 *src)
+{ memcpy(dst, src, IP6_ECOMM_LENGTH); return dst + 5; }
+
 
 int int_set_format(struct adata *set, int way, int from, byte *buf, uint size);
 int ec_format(byte *buf, u64 ec);
 int ec_set_format(struct adata *set, int from, byte *buf, uint size);
 int lc_format(byte *buf, lcomm lc);
 int lc_set_format(struct adata *set, int from, byte *buf, uint size);
+int ip6ec_format(byte *buf, ip6ec ec);
+int ip6ec_set_format(struct adata *set, int from, byte *buf, uint size);
 int int_set_contains(struct adata *list, u32 val);
 int ec_set_contains(struct adata *list, u64 val);
 int lc_set_contains(struct adata *list, lcomm val);
+int ip6ec_set_contains(struct adata *list, ip6ec val);
 struct adata *int_set_prepend(struct linpool *pool, struct adata *list, u32 val);
 struct adata *int_set_add(struct linpool *pool, struct adata *list, u32 val);
 struct adata *ec_set_add(struct linpool *pool, struct adata *list, u64 val);
 struct adata *lc_set_add(struct linpool *pool, struct adata *list, lcomm val);
+struct adata *ip6ec_set_add(struct linpool *pool, struct adata *list, ip6ec val);
 struct adata *int_set_del(struct linpool *pool, struct adata *list, u32 val);
 struct adata *ec_set_del(struct linpool *pool, struct adata *list, u64 val);
 struct adata *lc_set_del(struct linpool *pool, struct adata *list, lcomm val);
+struct adata *ip6ec_set_del(struct linpool *pool, struct adata *list, ip6ec val);
 struct adata *int_set_union(struct linpool *pool, struct adata *l1, struct adata *l2);
 struct adata *ec_set_union(struct linpool *pool, struct adata *l1, struct adata *l2);
 struct adata *lc_set_union(struct linpool *pool, struct adata *l1, struct adata *l2);
+struct adata *ip6ec_set_union(struct linpool *pool, struct adata *l1, struct adata *l2);
 
 struct adata *ec_set_del_nontrans(struct linpool *pool, struct adata *set);
 struct adata *int_set_sort(struct linpool *pool, struct adata *src);
 struct adata *ec_set_sort(struct linpool *pool, struct adata *src);
 struct adata *lc_set_sort(struct linpool *pool, struct adata *src);
+struct adata *ip6ec_set_sort(struct linpool *pool, struct adata *src);
 
 void ec_set_sort_x(struct adata *set); /* Sort in place */
 

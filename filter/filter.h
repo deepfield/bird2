@@ -27,6 +27,7 @@
   F(FI_PAIR_CONSTRUCT,		'm', 'p') \
   F(FI_EC_CONSTRUCT,		'm', 'c') \
   F(FI_LC_CONSTRUCT,		'm', 'l') \
+  F(FI_IP6EC_CONSTRUCT,		'm', '6') \
   F(FI_PATHMASK_CONSTRUCT,	'm', 'P') \
   F(FI_NEQ,			'!', '=') \
   F(FI_EQ,			'=', '=') \
@@ -122,6 +123,7 @@ struct f_val {
     uint i;
     u64 ec;
     lcomm lc;
+    ip6ec i6e;
     ip_addr ip;
     const net_addr *net;
     char *s;
@@ -245,6 +247,8 @@ void val_format(struct f_val v, buffer *buf);
 #define T_LC 0x28		/* Large community value, lcomm */
 #define T_LCLIST 0x29		/* Large community list */
 #define T_RD 0x2a		/* Route distinguisher for VPN addresses */
+#define T_IP6EC 0x2b		/* IPv6 address specific ext. community value, ip6ec (RFC 5701) */
+#define T_IP6ECLIST 0x2c	/* IPv6 address specific ext. community list (RFC 5701) */
 
 #define T_RETURN 0x40
 #define T_SET 0x80

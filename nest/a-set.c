@@ -565,3 +565,155 @@ lc_set_sort(struct linpool *pool, struct adata *src)
   qsort(dst->data, dst->length / LCOMM_LENGTH, LCOMM_LENGTH, lc_set_cmp);
   return dst;
 }
+
+
+int
+ip6ec_format(byte *buf, ip6ec ec)
+{
+  byte b[IP6_ECOMM_LENGTH];
+  put_u32s(b, ec.v, 5);
+
+  uint subtype = get_u8(b + 1);
+  ip_addr ip = ipa_from_ip6(get_ip6(b + 2));
+  uint la = get_u16(b + 18);
+
+  return bsprintf(buf, "(ip6ec, 0x%x, %I, 0x%x)", subtype, ip, la);
+}
+
+int
+ip6ec_set_format(struct adata *set, int from, byte *buf, uint bufsize)
+{
+  u32 *d = (u32 *) set->data;
+  byte *end = buf + bufsize - 80;
+  int from2 = MAX(from, 0);
+  int to = set->length / 4;
+  int i;
+
+  for (i = from2; i < to; i += 5)
+    {
+      if (buf > end)
+	{
+	  if (from < 0)
+	    strcpy(buf, "...");
+	  else
+	    buf[-1] = 0;
+	  return i;
+	}
+
+      buf += ip6ec_format(buf, ip6ec_get(d, i));
+      *buf++ = ' ';
+    }
+
+  if (i != from2)
+    buf--;
+
+  *buf = 0;
+  return 0;
+}
+
+int
+ip6ec_set_contains(struct adata *list, ip6ec val)
+{
+  if (!list)
+    return 0;
+
+  u32 *l = int_set_get_data(list);
+  int len = int_set_get_size(list);
+  int i;
+
+  for (i = 0; i < len; i += 5)
+    if (ip6ec_match(l, i, val))
+      return 1;
+
+  return 0;
+}
+
+struct adata *
+ip6ec_set_add(struct linpool *pool, struct adata *list, ip6ec val)
+{
+  if (ip6ec_set_contains(list, val))
+    return list;
+
+  int olen = list ? list->length : 0;
+  struct adata *res = lp_alloc(pool, sizeof(struct adata) + olen + IP6_ECOMM_LENGTH);
+  res->length = olen + IP6_ECOMM_LENGTH;
+
+  if (list)
+    memcpy(res->data, list->data, list->length);
+
+  ip6ec_put((u32 *) (res->data + olen), val);
+
+  return res;
+}
+
+struct adata *
+ip6ec_set_del(struct linpool *pool, struct adata *list, ip6ec val)
+{
+  if (!ip6ec_set_contains(list, val))
+    return list;
+
+  struct adata *res;
+  res = lp_alloc(pool, sizeof(struct adata) + list->length - IP6_ECOMM_LENGTH);
+  res->length = list->length - IP6_ECOMM_LENGTH;
+
+  u32 *l = int_set_get_data(list);
+  u32 *k = int_set_get_data(res);
+  int len = int_set_get_size(list);
+  int i;
+
+  for (i = 0; i < len; i += 5)
+    if (! ip6ec_match(l, i, val))
+      k = ip6ec_copy(k, l+i);
+
+  return res;
+}
+
+struct adata *
+ip6ec_set_union(struct linpool *pool, struct adata *l1, struct adata *l2)
+{
+  if (!l1)
+    return l2;
+  if (!l2)
+    return l1;
+
+  struct adata *res;
+  int len = int_set_get_size(l2);
+  u32 *l = int_set_get_data(l2);
+  u32 tmp[len];
+  u32 *k = tmp;
+  int i;
+
+  for (i = 0; i < len; i += 5)
+    if (!ip6ec_set_contains(l1, ip6ec_get(l, i)))
+      k = ip6ec_copy(k, l+i);
+
+  if (k == tmp)
+    return l1;
+
+  len = (k - tmp) * 4;
+  res = lp_alloc(pool, sizeof(struct adata) + l1->length + len);
+  res->length = l1->length + len;
+  memcpy(res->data, l1->data, l1->length);
+  memcpy(res->data + l1->length, tmp, len);
+  return res;
+}
+
+static int
+ip6ec_set_cmp(const void *X, const void *Y)
+{
+  const u32 *x = X, *y = Y;
+  int i;
+  for (i = 0; i < 5; i++)
+    if (x[i] != y[i])
+      return (x[i] > y[i]) ? 1 : -1;
+  return 0;
+}
+
+struct adata *
+ip6ec_set_sort(struct linpool *pool, struct adata *src)
+{
+  struct adata *dst = lp_alloc_adata(pool, src->length);
+  memcpy(dst->data, src->data, src->length);
+  qsort(dst->data, dst->length / IP6_ECOMM_LENGTH, IP6_ECOMM_LENGTH, ip6ec_set_cmp);
+  return dst;
+}
